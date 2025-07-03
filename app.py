@@ -6,7 +6,7 @@ from scipy.stats import beta
 st.sidebar.header("Test Parameters")
 p_A = st.sidebar.slider("Baseline conversion rate (p_A)", 0.001, 0.20, 0.05, step=0.001,
                          help="Conversion rate for your control variant (A), e.g., 5% means 0.05")
-uplift = st.sidebar.slider("Expected uplift (e.g., 0.10 = +10%)", 0.0, 0.5, 0.10, step=0.01,
+uplift = st.sidebar.slider("Expected uplift (e.g., 0.10 = +10%)", 0.001, 0.5, 0.10, step=0.001,
                           help="Relative improvement expected in variant B over A")
 thresh = st.sidebar.slider("Posterior threshold (e.g., 0.95)", 0.5, 0.99, 0.95, step=0.01,
                            help="Confidence level to declare a winner — usually 0.95 or 0.99")
