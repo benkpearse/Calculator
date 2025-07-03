@@ -44,6 +44,7 @@ use_auto_prior = st.sidebar.checkbox(
 if use_auto_prior:
     hist_cr = st.sidebar.number_input(
         "Historical conversion rate (0.05 = 5%)", min_value=0.0, max_value=1.0, value=0.05, step=0.001,
+        format="%.3f",
         help="Observed conversion rate from your historical data."
     )
     hist_n = st.sidebar.number_input(
