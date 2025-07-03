@@ -15,7 +15,7 @@ desired_power = st.sidebar.slider("Desired power", 0.5, 0.99, 0.8, step=0.01,
 simulations = st.sidebar.slider("Simulations per n", 100, 2000, 500, step=100,
                                 help="Number of test simulations to run per sample size")
 samples = st.sidebar.slider("Posterior samples", 1000, 10000, 3500, step=500,
-                            help="Number of samples drawn from each posterior distribution")
+                            help="Number of samples drawn from each of the posterior distribution")
 
 # --- Simulation Function ---
 def simulate_power(p_A, uplift, threshold, desired_power, simulations, samples):
