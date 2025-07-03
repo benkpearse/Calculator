@@ -4,12 +4,18 @@ from scipy.stats import beta
 
 # --- Sidebar Inputs ---
 st.sidebar.header("Test Parameters")
-p_A = st.sidebar.slider("Baseline conversion rate (p_A)", 0.001, 0.20, 0.05, step=0.001)
-uplift = st.sidebar.slider("Expected uplift (e.g., 0.10 = +10%)", 0.0, 0.5, 0.10, step=0.01)
-thresh = st.sidebar.slider("Posterior threshold (e.g., 0.95)", 0.5, 0.99, 0.95, step=0.01)
-desired_power = st.sidebar.slider("Desired power", 0.5, 0.99, 0.8, step=0.01)
-simulations = st.sidebar.slider("Simulations per n", 100, 2000, 500, step=100)
-samples = st.sidebar.slider("Posterior samples", 1000, 10000, 2000, step=500)
+p_A = st.sidebar.slider("Baseline conversion rate (p_A)", 0.001, 0.20, 0.05, step=0.001,
+                         help="Conversion rate for your control variant (A), e.g., 5% means 0.05")
+uplift = st.sidebar.slider("Expected uplift (e.g., 0.10 = +10%)", 0.0, 0.5, 0.10, step=0.01,
+                          help="Relative improvement expected in variant B over A")
+thresh = st.sidebar.slider("Posterior threshold (e.g., 0.95)", 0.5, 0.99, 0.95, step=0.01,
+                           help="Confidence level to declare a winner — usually 0.95 or 0.99")
+desired_power = st.sidebar.slider("Desired power", 0.5, 0.99, 0.8, step=0.01,
+                                  help="Minimum acceptable probability of detecting a real uplift")
+simulations = st.sidebar.slider("Simulations per n", 100, 2000, 500, step=100,
+                                help="Number of test simulations to run per sample size")
+samples = st.sidebar.slider("Posterior samples", 1000, 10000, 3500, step=500,
+                            help="Number of samples drawn from each posterior distribution")
 
 # --- Simulation Function ---
 def simulate_power(p_A, uplift, threshold, desired_power, simulations, samples):
