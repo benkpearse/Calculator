@@ -1,6 +1,7 @@
 import streamlit as st
 import numpy as np
 from scipy.stats import beta
+from numba import njit
 import matplotlib.pyplot as plt
 
 # --- Sidebar Inputs ---
@@ -63,37 +64,44 @@ else:
         help="Represents prior belief in failure count before the test. Adjust this if you have historical data."
     )
 
-# --- Memory-efficient Simulation Function ---
+# --- Simulation Function using Numba ---
+@njit
+def simulate_single_trial(n, p_A, p_B, samples, alpha_prior, beta_prior, threshold):
+    conv_A = np.random.binomial(n, p_A)
+    conv_B = np.random.binomial(n, p_B)
+
+    alpha_A = alpha_prior + conv_A
+    beta_A = beta_prior + n - conv_A
+    alpha_B = alpha_prior + conv_B
+    beta_B = beta_prior + n - conv_B
+
+    wins = 0
+    for _ in range(samples):
+        sample_A = np.random.beta(alpha_A, beta_A)
+        sample_B = np.random.beta(alpha_B, beta_B)
+        if sample_B > sample_A:
+            wins += 1
+
+    return wins / samples > threshold
+
+@njit
 def simulate_power(p_A, uplift, threshold, desired_power, simulations, samples, alpha_prior, beta_prior):
     p_B = p_A * (1 + uplift)
     n = 1000
-    powers = []
+    results = []
 
     while n <= 500000:
-        power_hits = 0
-
+        wins = 0
         for _ in range(simulations):
-            conv_A = np.random.binomial(n, p_A)
-            conv_B = np.random.binomial(n, p_B)
-
-            post_A = beta(alpha_prior + conv_A, beta_prior + n - conv_A)
-            post_B = beta(alpha_prior + conv_B, beta_prior + n - conv_B)
-
-            samples_A = post_A.rvs(samples)
-            samples_B = post_B.rvs(samples)
-
-            prob_B_superior = np.mean(samples_B > samples_A)
-            if prob_B_superior > threshold:
-                power_hits += 1
-
-        power = power_hits / simulations
-        powers.append((n, power))
-
+            if simulate_single_trial(n, p_A, p_B, samples, alpha_prior, beta_prior, threshold):
+                wins += 1
+        power = wins / simulations
+        results.append((n, power))
         if power >= desired_power:
             break
         n += 5000
 
-    return powers
+    return results
 
 # --- Run Simulation ---
 results = simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior)
@@ -136,5 +144,3 @@ plt.title("Power Curve")
 plt.grid(True)
 plt.legend()
 st.pyplot(plt)
-
-st.markdown("---")
