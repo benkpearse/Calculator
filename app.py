@@ -21,13 +21,13 @@ This tool estimates the **minimum sample size per group** required to detect a g
 # --- Sidebar Inputs ---
 st.sidebar.header("🛠️ Test Parameters")
 p_A = st.sidebar.number_input(
-    "Baseline conversion rate (p_A)", min_value=0.0001, max_value=0.99, value=0.05, step=0.001,
-    format="%.4f",
+    "Baseline conversion rate (p_A)", min_value=0.01, max_value=0.99, value=0.05, step=0.001,
+    format="%.3f",
     help="Conversion rate for your control variant (A), e.g., 5% = 0.050"
 )
 uplift = st.sidebar.number_input(
-    "Expected uplift (e.g., 0.10 = +10%)", min_value=0.0001, max_value=0.99, value=0.10, step=0.01,
-    format="%.4f",
+    "Expected uplift (e.g., 0.10 = +10%)", min_value=0.0, max_value=0.99, value=0.10, step=0.01,
+    format="%.3f",
     help="Relative improvement expected in variant B over A"
 )
 thresh = st.sidebar.slider(
@@ -51,6 +51,14 @@ samples = st.sidebar.slider(
 st.sidebar.markdown("---")
 st.sidebar.subheader("📚 Optional Prior Beliefs")
 
+st.sidebar.markdown("""
+Use prior beliefs to incorporate historical data into your test.
+
+- **Alpha** represents prior conversions (successes).
+- **Beta** represents prior non-conversions (failures).
+- You can manually enter them or auto-calculate from historical data.
+""")
+
 use_auto_prior = st.sidebar.checkbox(
     "Auto-calculate priors from historical data",
     help="Use a historical conversion rate and sample size to generate prior beliefs."
@@ -59,7 +67,7 @@ use_auto_prior = st.sidebar.checkbox(
 if use_auto_prior:
     hist_cr = st.sidebar.number_input(
         "Historical conversion rate (0.05 = 5%)", min_value=0.0, max_value=1.0, value=0.05, step=0.001,
-        format="%.4f",
+        format="%.3f",
         help="Observed conversion rate from your historical data."
     )
     hist_n = st.sidebar.number_input(
@@ -128,8 +136,13 @@ else:
     st.warning("⚠️ Test did not reach desired power within simulation limits.")
 
 # --- Export Option ---
-with st.expander("📤 Export Results"):
-    st.download_button("Download CSV", data=f"Sample Size,Power\n" + "\n".join([f"{n},{p}" for n, p in results]), file_name="bayesian_power_curve.csv", mime="text/csv")
+with st.expander("Download Results as CSV"):
+    st.download_button(
+        label="💾 Save Power Curve CSV",
+        data=f"Sample Size,Power\n" + "\n".join([f"{n},{p}" for n, p in results]),
+        file_name="bayesian_power_curve.csv",
+        mime="text/csv"
+    )
 
 # --- Plotting ---
 plt.figure(figsize=(8, 4))
@@ -143,11 +156,15 @@ plt.legend()
 st.pyplot(plt)
 
 # --- Educational Tip ---
-with st.expander("ℹ️ What this chart means"):
-    st.markdown(f"""
-    - The **power curve** shows how your ability to detect a real uplift increases as sample size grows.
-    - A power of 80% (red line) is often considered the minimum acceptable level.
-    - The vertical position where the curve crosses this line is your required sample size.
+st.markdown("""
+<details>
+<summary><strong>ℹ️ What this chart means</strong></summary>
 
-    This helps prevent **underpowered tests**, which might miss real effects.
-    """)
+- The **power curve** shows how your ability to detect a real uplift increases as sample size grows.
+- A power of 80% (red line) is often considered the minimum acceptable level.
+- The vertical position where the curve crosses this line is your required sample size.
+
+This helps prevent **underpowered tests**, which might miss real effects.
+
+</details>
+""", unsafe_allow_html=True)
