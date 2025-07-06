@@ -135,14 +135,15 @@ if power_values[-1] >= desired_power:
 else:
     st.warning("⚠️ Test did not reach desired power within simulation limits.")
 
-# --- Export Option ---
-with st.expander("Download Results as CSV"):
-    st.download_button(
-        label="💾 Save Power Curve CSV",
-        data=f"Sample Size,Power\n" + "\n".join([f"{n},{p}" for n, p in results]),
-        file_name="bayesian_power_curve.csv",
-        mime="text/csv"
-    )
+# --- CSV Export ---
+st.markdown("### 📂 Export")
+st.caption("Download the power curve data for your own reporting or analysis.")
+st.download_button(
+    label="💾 Download CSV",
+    data=f"Sample Size,Power\n" + "\n".join([f"{n},{p}" for n, p in results]),
+    file_name="bayesian_power_curve.csv",
+    mime="text/csv",
+)
 
 # --- Plotting ---
 plt.figure(figsize=(8, 4))
