@@ -6,10 +6,9 @@ import matplotlib.pyplot as plt
 # --- App Title and Navigation ---
 st.set_page_config(
     page_title="Bayesian Test Suite",
-    page_icon="/mnt/data/b1b01ac3-61de-4374-84ce-d254142ebdac.png",
     layout="wide"
 )
-st.image("/mnt/data/b1b01ac3-61de-4374-84ce-d254142ebdac.png", width=50)
+
 st.title("🧪 Bayesian A/B Test Power Calculator")
 
 st.markdown("""
