@@ -4,7 +4,12 @@ from scipy.stats import beta
 import matplotlib.pyplot as plt
 
 # --- App Title and Navigation ---
-st.set_page_config(page_title="Bayesian Test Suite", page_icon="🧪", layout="wide")
+st.set_page_config(
+    page_title="Bayesian Test Suite",
+    page_icon="/mnt/data/b1b01ac3-61de-4374-84ce-d254142ebdac.png",
+    layout="wide"
+)
+st.image("/mnt/data/b1b01ac3-61de-4374-84ce-d254142ebdac.png", width=50)
 st.title("🧪 Bayesian A/B Test Power Calculator")
 
 st.markdown("""
@@ -151,15 +156,12 @@ else:
 # --- CSV Export ---
 st.markdown("### 📂 Export")
 st.caption("Download the power curve data for your own reporting or analysis.")
-with st.container():
-    st.markdown("<div style='display: inline-block;'>", unsafe_allow_html=True)
-    st.download_button(
-        label="📏 Download CSV",
-        data=f"Sample Size,Power\n" + "\n".join([f"{n},{p}" for n, p in results]),
-        file_name="bayesian_power_curve.csv",
-        mime="text/csv",
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
+st.download_button(
+    label="📏 Download CSV",
+    data=f"Sample Size,Power\n" + "\n".join([f"{n},{p}" for n, p in results]),
+    file_name="bayesian_power_curve.csv",
+    mime="text/csv",
+)
 
 # --- Plotting ---
 plt.figure(figsize=(8, 4))
@@ -185,4 +187,3 @@ This helps prevent **underpowered tests**, which might miss real effects.
 
 </details>
 """, unsafe_allow_html=True)
-
