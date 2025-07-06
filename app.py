@@ -146,7 +146,7 @@ st.download_button(
 )
 
 # --- Plotting ---
-plt.figure(figsize=(6, 3))
+plt.figure(figsize=(3, 1))
 plt.plot(sample_sizes, power_values, marker='o')
 plt.axhline(desired_power, color='red', linestyle='--', label='Target Power')
 plt.xlabel("Sample Size per Group")
