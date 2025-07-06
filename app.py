@@ -86,6 +86,19 @@ else:
         help="Prior belief in non-conversions."
     )
 
+# --- Explanation of Priors ---
+st.markdown("""
+---
+
+📘 **About Priors**
+
+Bayesian power analysis allows you to incorporate existing knowledge using priors.
+
+- Use **Alpha** and **Beta** to reflect prior beliefs from historical data.
+- You can **auto-calculate** them from past conversion rates and sample sizes.
+- If you’re unsure, the default of `Alpha = 1`, `Beta = 1` is a non-informative prior (neutral).
+""")
+
 # --- Power Calculation Function ---
 def simulate_power(p_A, uplift, threshold, desired_power, simulations, samples, alpha_prior, beta_prior):
     p_B = p_A * (1 + uplift)
@@ -138,15 +151,18 @@ else:
 # --- CSV Export ---
 st.markdown("### 📂 Export")
 st.caption("Download the power curve data for your own reporting or analysis.")
-st.download_button(
-    label="💾 Download CSV",
-    data=f"Sample Size,Power\n" + "\n".join([f"{n},{p}" for n, p in results]),
-    file_name="bayesian_power_curve.csv",
-    mime="text/csv",
-)
+with st.container():
+    st.markdown("<div style='display: inline-block;'>", unsafe_allow_html=True)
+    st.download_button(
+        label="📏 Download CSV",
+        data=f"Sample Size,Power\n" + "\n".join([f"{n},{p}" for n, p in results]),
+        file_name="bayesian_power_curve.csv",
+        mime="text/csv",
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # --- Plotting ---
-plt.figure(figsize=(3, 1.5))
+plt.figure(figsize=(8, 4))
 plt.plot(sample_sizes, power_values, marker='o')
 plt.axhline(desired_power, color='red', linestyle='--', label='Target Power')
 plt.xlabel("Sample Size per Group")
@@ -169,3 +185,4 @@ This helps prevent **underpowered tests**, which might miss real effects.
 
 </details>
 """, unsafe_allow_html=True)
+
