@@ -199,3 +199,32 @@ plt.title("Power vs. " + ("Sample Size" if mode == "Estimate Sample Size" else "
 plt.grid(True)
 plt.legend()
 st.pyplot(plt)
+
+# --- Conceptual Explanation ---
+st.markdown("""
+<details>
+<summary><strong>ℹ️ What is Minimum Detectable Effect (MDE)?</strong></summary>
+
+**Minimum Detectable Effect (MDE)** tells you the smallest improvement (uplift) your test is likely to detect with a given amount of data.
+
+If your true uplift is smaller than the MDE, you probably won’t detect it — not because it's not real, but because your test isn't sensitive enough.
+
+Use MDE to set realistic expectations: if your MDE is 5%, don’t expect to reliably detect a 2% improvement.
+
+</details>
+
+<details>
+<summary><strong>ℹ️ What Does Power Mean in Bayesian A/B Testing?</strong></summary>
+
+Bayesian power answers this question:
+
+> **If the improvement is real, how often will my test be confident enough to detect it?**
+
+We define “confident enough” as your posterior probability threshold (e.g., P(B > A) > 0.95).
+
+So if you expect a 10% uplift and run 300 tests with that uplift, power is the percent of those that correctly conclude B is better than A.
+
+This helps you decide how much data is needed before starting a real test.
+
+</details>
+""", unsafe_allow_html=True)
