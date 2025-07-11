@@ -227,4 +227,27 @@ So if you expect a 10% uplift and run 300 tests with that uplift, power is the p
 This helps you decide how much data is needed before starting a real test.
 
 </details>
+
+<details>
+<summary><strong>ℹ️ About Priors in Bayesian A/B Testing</strong></summary>
+
+Priors represent your prior beliefs about the conversion rate before running the test.
+
+A **Beta prior** is defined by two parameters:
+- **Alpha** = prior successes
+- **Beta** = prior failures
+
+If you have **no strong prior belief**, use `alpha = 1`, `beta = 1` — this is called a uniform (or uninformative) prior.
+
+If you **have historical data**, you can encode it using:
+- Prior conversion rate (e.g., 0.05)
+- Prior sample size (e.g., 1000)
+
+These get translated into alpha and beta by:
+- `alpha = conversion rate × sample size`
+- `beta = (1 - conversion rate) × sample size`
+
+Over time, you can build better priors by accumulating test outcomes in similar contexts (e.g., same site, funnel, device). This makes your tests more data-efficient.
+
+</details>
 """, unsafe_allow_html=True)
