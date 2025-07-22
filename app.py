@@ -12,9 +12,11 @@ def run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, t
     """
     n_A = n
     n_B = n
-
-    # Use a fixed random seed for reproducible binomial sampling
+    
+    # Create a single random number generator for reproducibility
     rng = np.random.default_rng(seed=42)
+
+    # Use the generator for all random operations in this function
     conversions_A = rng.binomial(n_A, p_A, size=simulations)
     conversions_B = rng.binomial(n_B, p_B, size=simulations)
 
@@ -23,9 +25,9 @@ def run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, t
     alpha_post_B = alpha_prior + conversions_B
     beta_post_B = beta_prior + n_B - conversions_B
 
-    # Use a fixed random seed for reproducible posterior sampling
-    post_samples_A = beta.rvs(alpha_post_A, beta_post_A, size=(samples, simulations), random_state=42)
-    post_samples_B = beta.rvs(alpha_post_B, beta_post_B, size=(samples, simulations), random_state=43) # Use a different seed for B
+    # Pass the same generator to ensure independent, reproducible sampling
+    post_samples_A = beta.rvs(alpha_post_A, beta_post_A, size=(samples, simulations), random_state=rng)
+    post_samples_B = beta.rvs(alpha_post_B, beta_post_B, size=(samples, simulations), random_state=rng)
 
     prob_B_better = np.mean(post_samples_B > post_samples_A, axis=0)
 
@@ -113,8 +115,8 @@ desired_power = st.sidebar.slider(
 )
 simulations = st.sidebar.slider(
     "Simulations", 100, 2000, 300, step=100,
-    help="How many test simulations to run")
-
+    help="How many test simulations to run"
+)
 samples = st.sidebar.slider(
     "Posterior samples", 500, 3000, 1000, step=100,
     help="How many samples to draw from each posterior distribution"
