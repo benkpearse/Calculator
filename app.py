@@ -1,14 +1,3 @@
-Of course. The provided Streamlit script is missing the core simulation functions it calls: `simulate_power` and `simulate_mde`. The entire application logic depends on these functions to calculate the relationship between sample size, power, and minimum detectable effect (MDE).
-
-When the script tries to execute `results = simulate_power(...)` or `results = simulate_mde(...)`, it will fail with a `NameError` because these functions have not been defined.
-
------
-
-### **Corrected Code**
-
-Here is the complete, working script with the necessary `simulate_power` and `simulate_mde` functions added. The new functions are placed after the imports for clarity.
-
-```python
 import streamlit as st
 import numpy as np
 from scipy.stats import beta
