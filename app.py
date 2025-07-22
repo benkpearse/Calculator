@@ -236,6 +236,7 @@ You get a clearer picture of the object you're looking for (Higher Power)
 If you're focused on one specific star (a specific expected uplift), that same big lens (more users) gives you a much better chance (higher power) of capturing a sharp, undeniable photo of it, rather than a blurry, inconclusive smudge.
 
 In short, Power and MDE are two sides of the same coin: test sensitivity. Increasing your sample size makes your test more sensitive overall.
+
 ---
 #### What is Minimum Detectable Effect (MDE)? 🔎
 The **Minimum Detectable Effect (MDE)** is the smallest improvement your test can reliably detect at a given power level.
