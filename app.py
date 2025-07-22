@@ -225,12 +225,17 @@ with st.expander("ℹ️ Learn about the concepts used in this calculator"):
 #### What is Sample Size? 👥
 **Sample size** is the number of users in each group of your test (e.g., 10,000 in control, 10,000 in variant). It's the main dial you can turn to adjust your test's sensitivity.
 
-The relationships are simple:
-- **More users** ➡️ **Higher Power** (you're more likely to find a real winner).
-- **More users** ➡️ **Lower MDE** (you can reliably detect smaller improvements).
+Think of your A/B test as trying to take a picture of a distant star. The sample size (number of users) is the size of your camera lens.
 
-The goal is to find the right balance. You need enough users to be confident in the result, but not so many that you waste time and traffic. This calculator helps you find that sweet spot.
+A larger sample size reduces the effect of random noise, giving you a clearer, more precise measurement of each variant's true performance. This increased clarity improves your test in two related ways:
 
+You can see smaller objects (Lower MDE)
+A bigger lens (more users) lets you resolve finer details. You can now reliably detect a very faint star (a smaller effect) that would have been invisible to a smaller lens. This is why more users lead to a lower MDE.
+
+You get a clearer picture of the object you're looking for (Higher Power)
+If you're focused on one specific star (a specific expected uplift), that same big lens (more users) gives you a much better chance (higher power) of capturing a sharp, undeniable photo of it, rather than a blurry, inconclusive smudge.
+
+In short, Power and MDE are two sides of the same coin: test sensitivity. Increasing your sample size makes your test more sensitive overall.
 ---
 #### What is Minimum Detectable Effect (MDE)? 🔎
 The **Minimum Detectable Effect (MDE)** is the smallest improvement your test can reliably detect at a given power level.
