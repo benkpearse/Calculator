@@ -30,35 +30,52 @@ def run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, t
     return power
 
 @st.cache_data
-def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, max_sample_size):
+def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior):
     """
     Simulates power across a range of sample sizes to find the minimum
     sample size required to achieve the desired power.
+    This version now dynamically searches for the sample size.
     """
     p_B = p_A * (1 + uplift)
     if p_B > 1.0:
         st.error(f"Error: Uplift of {uplift:.2%} on baseline {p_A:.2%} results in a conversion rate > 100%. Please lower the uplift or baseline.")
-        return [(0, 0)]
+        return []
 
     results = []
-    sample_sizes = np.unique(np.logspace(2, np.log10(max_sample_size), 20).astype(int))
+    n = 100  # Start with a small sample size
+    power = 0
+    max_iterations = 30  # Safety break to prevent infinite loops
+    iterations = 0
 
-    with st.spinner("Running simulations for sample size..."):
-        for n in sample_sizes:
+    with st.spinner("Searching for required sample size... This may take a moment."):
+        while power < desired_power and iterations < max_iterations:
             power = run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, thresh)
             results.append((n, power))
+            
             if power >= desired_power:
                 break
+
+            # Increase sample size: smaller steps at first, bigger steps later for efficiency
+            if n < 1000:
+                n += 100
+            elif n < 20000:
+                n = int(n * 1.5)
+            else:
+                n = int(n * 1.25)
+            
+            iterations += 1
+            
     return results
 
 @st.cache_data
-def simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n, max_uplift):
+def simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n):
     """
     Simulates power across a range of uplifts (MDEs) for a fixed sample size
     to find the minimum detectable effect.
     """
     results = []
-    uplifts = np.linspace(0.01, max_uplift, 20)
+    # Test a reasonable, fixed range of uplifts up to 50%
+    uplifts = np.linspace(0.01, 0.50, 20)
 
     with st.spinner("Running simulations for MDE..."):
         for uplift in uplifts:
@@ -146,13 +163,6 @@ else:
         help="Prior belief in failures before the test."
     )
 
-# --- Advanced Options ---
-st.sidebar.markdown("---")
-with st.sidebar.expander("Advanced Options"):
-    max_sample_size = st.number_input("Max Sample Size to Simulate", min_value=1000, max_value=1000000, value=100000, step=1000)
-    max_uplift = st.slider("Max Uplift to Simulate", min_value=0.1, max_value=1.0, value=0.4, step=0.05, format="%.2f")
-
-
 # --- App Body ---
 st.title("Bayesian A/B Pre-Test Calculator")
 
@@ -160,8 +170,8 @@ results_available = False
 if st.button("Run Calculation"):
 
     if mode == "Estimate Sample Size":
-        results = simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, max_sample_size)
-        if len(results) > 1 or (len(results) == 1 and results[0][1] > 0):
+        results = simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior)
+        if results:
             x_vals, y_vals = zip(*results)
             results_available = True
 
@@ -178,16 +188,16 @@ if st.button("Run Calculation"):
                     f"(achieved {y_vals[-1]:.1%} power)."
                 )
             else:
-                st.warning("Test did not reach desired power within simulation limits. Try increasing the max sample size in Advanced Options.")
+                st.warning("Could not reach desired power. The uplift may be too small or the power target too high for a practical test.")
 
             st.markdown("""
             ### 📊 What This Means
             This chart shows how sample size impacts your ability to detect the expected uplift.
-            The red line shows your required power (e.g. 80%). Where the curve crosses this line is the recommended sample size.
+            The red line shows your required power. Where the curve crosses this line is the recommended sample size.
             """)
     else: # Estimate MDE Mode
-        results = simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n, max_uplift)
-        if len(results) > 1 or (len(results) == 1 and results[0][1] > 0):
+        results = simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n)
+        if results:
             x_vals, y_vals = zip(*results)
             results_available = True
 
@@ -204,22 +214,22 @@ if st.button("Run Calculation"):
                     f"(achieved {y_vals[-1]:.1%} power)."
                 )
             else:
-                st.warning("Simulation did not reach target power. Try increasing sample size, simulations, or the max uplift range in Advanced Options.")
+                st.warning("Simulation could not reach target power with the given sample size.")
 
             st.markdown("""
             ### 📊 What This Means
             This chart shows how much uplift your test can reliably detect given your fixed sample size.
-            The red line shows your required power (e.g. 80%). Where the curve crosses this line is your minimum detectable effect.
+            The red line shows your required power. Where the curve crosses this line is your minimum detectable effect.
             """)
 
-    # --- Plotting (now inside the button click logic) ---
     if results_available:
         fig, ax = plt.subplots(figsize=(8, 4))
         ax.plot(x_vals, y_vals, marker='o', label='Estimated Power')
         ax.axhline(desired_power, color='red', linestyle='--', label='Target Power')
         if mode == "Estimate Sample Size":
             ax.set_xlabel("Sample Size per Group")
-            ax.set_xscale('log')
+            if len(x_vals) > 1: # Only set log scale if there's a range to show
+                ax.set_xscale('log')
             ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"{int(x):,}"))
         else:
             ax.set_xlabel("Relative Uplift (MDE)")
@@ -230,7 +240,7 @@ if st.button("Run Calculation"):
         ax.legend()
         st.pyplot(fig)
 
-# --- Time-Based Planning (NEW SECTION) ---
+# --- Time-Based Planning ---
 st.markdown("---")
 st.header("⏱️ Time-Based Planning")
 st.markdown("Use this section to translate your sample size requirements into a real-world timeline.")
@@ -243,27 +253,22 @@ weekly_traffic = st.number_input(
     help="Enter the total number of users you expect to enter the experiment each week (before the 50/50 split)."
 )
 
-# This section will only show its output after a calculation has been run
 if results_available:
     st.subheader("🗓️ Duration Estimate")
     users_per_week_per_variant = weekly_traffic / 2
 
     if users_per_week_per_variant > 0:
         if mode == "Estimate Sample Size":
-            # Check if a valid sample size was found
             if 'y_vals' in locals() and y_vals[-1] >= desired_power:
                 required_sample_size = x_vals[-1]
                 estimated_weeks = required_sample_size / users_per_week_per_variant
                 st.info(f"To reach the required **{required_sample_size:,} users per variant**, you'll need to run this test for approximately **{estimated_weeks:.1f} weeks**.")
             else:
-                st.warning("Cannot estimate duration because the target power was not reached. Adjust parameters and re-run.")
+                st.warning("Cannot estimate duration because the target power was not reached.")
         else: # MDE Mode
             required_sample_size = fixed_n
             estimated_weeks = required_sample_size / users_per_week_per_variant
             st.info(f"To reach your fixed sample size of **{required_sample_size:,} users per variant**, it will take approximately **{estimated_weeks:.1f} weeks**.")
-    else:
-        st.warning("Please enter a valid weekly traffic number to estimate test duration.")
-
 
 # --- Conceptual Explanation ---
 st.markdown("---")
