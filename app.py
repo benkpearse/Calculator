@@ -2,11 +2,10 @@ import streamlit as st
 import numpy as np
 from scipy.stats import beta
 import matplotlib.pyplot as plt
-import pandas as pd
 
-# --- Core Simulation Functions (MISSING FROM ORIGINAL CODE) ---
+# --- Core Simulation Functions ---
 
-@st.cache_data
+# Decorator moved from here
 def run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, thresh):
     """
     Runs a single set of simulations for a given sample size and conversion rates.
@@ -15,28 +14,23 @@ def run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, t
     n_A = n
     n_B = n
 
-    # Generate synthetic data from simulations
     conversions_A = np.random.binomial(n_A, p_A, size=simulations)
     conversions_B = np.random.binomial(n_B, p_B, size=simulations)
 
-    # Calculate posteriors for each simulation
     alpha_post_A = alpha_prior + conversions_A
     beta_post_A = beta_prior + n_A - conversions_A
     alpha_post_B = alpha_prior + conversions_B
     beta_post_B = beta_prior + n_B - conversions_B
 
-    # Draw samples from posterior distributions
     post_samples_A = beta.rvs(alpha_post_A, beta_post_A, size=(samples, simulations))
     post_samples_B = beta.rvs(alpha_post_B, beta_post_B, size=(samples, simulations))
 
-    # Calculate probability of B > A for each simulation
     prob_B_better = np.mean(post_samples_B > post_samples_A, axis=0)
 
-    # Power is the proportion of simulations where we correctly detect the effect
     power = np.mean(prob_B_better > thresh)
     return power
 
-
+@st.cache_data # Decorator added here for more efficient caching
 def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior):
     """
     Simulates power across a range of sample sizes to find the minimum
@@ -48,36 +42,34 @@ def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alp
         return [(0, 0)]
 
     results = []
-    # Start with a reasonable sample size and increase it
-    sample_sizes = np.unique(np.logspace(2, 5, 20).astype(int)) # e.g., from 100 to 100,000
+    sample_sizes = np.unique(np.logspace(2, 5, 20).astype(int))
 
     with st.spinner("Running simulations for sample size..."):
         for n in sample_sizes:
             power = run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, thresh)
             results.append((n, power))
             if power >= desired_power:
-                break # Stop once we've reached the target power
+                break
     return results
 
-
+@st.cache_data # Decorator added here for more efficient caching
 def simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n):
     """
     Simulates power across a range of uplifts (MDEs) for a fixed sample size
     to find the minimum detectable effect.
     """
     results = []
-    # Test a range of potential uplifts
-    uplifts = np.linspace(0.01, 0.40, 20) # e.g., from 1% to 40% uplift
+    uplifts = np.linspace(0.01, 0.40, 20) 
 
     with st.spinner("Running simulations for MDE..."):
         for uplift in uplifts:
             p_B = p_A * (1 + uplift)
             if p_B > 1.0:
-                continue # Skip invalid conversion rates
+                continue
             power = run_simulation(fixed_n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, thresh)
             results.append((uplift, power))
             if power >= desired_power:
-                break # Stop once we've found an uplift that meets the power requirement
+                break
     return results
 
 
@@ -155,18 +147,15 @@ else:
         help="Prior belief in failures before the test."
     )
 
-# --- Run Simulation ---
+# --- App Body ---
 st.title("Bayesian A/B Pre-Test Calculator")
 
-# Initialize placeholder
-x_vals, y_vals = [0], [0]
 results_available = False
-
 if st.button("Run Calculation"):
 
     if mode == "Estimate Sample Size":
         results = simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior)
-        if len(results) > 1 or (len(results) == 1 and results[0][1] > 0): # Check if simulation ran successfully
+        if len(results) > 1 or (len(results) == 1 and results[0][1] > 0):
             x_vals, y_vals = zip(*results)
             results_available = True
     
@@ -189,7 +178,7 @@ if st.button("Run Calculation"):
             """)
     else: # Estimate MDE Mode
         results = simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n)
-        if len(results) > 1 or (len(results) == 1 and results[0][1] > 0): # Check if simulation ran successfully
+        if len(results) > 1 or (len(results) == 1 and results[0][1] > 0):
             x_vals, y_vals = zip(*results)
             results_available = True
     
@@ -211,7 +200,7 @@ if st.button("Run Calculation"):
             The red line shows your required power (e.g. 80%). Where the curve crosses this line is your minimum detectable effect.
             """)
     
-    # --- Plotting ---
+    # --- Plotting (now inside the button click logic) ---
     if results_available:
         fig, ax = plt.subplots(figsize=(8, 4))
         ax.plot(x_vals, y_vals, marker='o', label='Estimated Power')
