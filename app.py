@@ -77,71 +77,8 @@ else:
         help="Prior belief in failures before the test."
     )
 
-# --- Simulate Functions ---
-def simulate_power(p_A, uplift, threshold, desired_power, simulations, samples, alpha_prior, beta_prior):
-    p_B = p_A * (1 + uplift)
-    n = 1000
-    powers = []
-
-    while n <= 500000:
-        power_hits = 0
-
-        for _ in range(simulations):
-            conv_A = np.random.binomial(n, p_A)
-            conv_B = np.random.binomial(n, p_B)
-
-            post_A = beta(alpha_prior + conv_A, beta_prior + n - conv_A)
-            post_B = beta(alpha_prior + conv_B, beta_prior + n - conv_B)
-
-            samples_A = post_A.rvs(samples)
-            samples_B = post_B.rvs(samples)
-
-            prob_B_superior = np.mean(samples_B > samples_A)
-            if prob_B_superior > threshold:
-                power_hits += 1
-
-        power = power_hits / simulations
-        powers.append((n, power))
-
-        if power >= desired_power:
-            break
-        n += 5000
-
-    return powers
-
-def simulate_mde(p_A, threshold, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n):
-    uplift = 0.001
-    powers = []
-
-    while uplift < 2.0:
-        p_B = p_A * (1 + uplift)
-        power_hits = 0
-
-        for _ in range(simulations):
-            conv_A = np.random.binomial(fixed_n, p_A)
-            conv_B = np.random.binomial(fixed_n, p_B)
-
-            post_A = beta(alpha_prior + conv_A, beta_prior + fixed_n - conv_A)
-            post_B = beta(alpha_prior + conv_B, beta_prior + fixed_n - conv_B)
-
-            samples_A = post_A.rvs(samples)
-            samples_B = post_B.rvs(samples)
-
-            prob_B_superior = np.mean(samples_B > samples_A)
-            if prob_B_superior > threshold:
-                power_hits += 1
-
-        power = power_hits / simulations
-        powers.append((uplift, power))
-
-        if power >= desired_power:
-            break
-        uplift += 0.01
-
-    return powers
-
 # --- Run Simulation ---
-st.title("🧪 Bayesian A/B Test Calculator")
+st.title("Bayesian A/B Pre Test Calculator")
 
 if mode == "Estimate Sample Size":
     results = simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior)
@@ -251,3 +188,83 @@ Over time, you can build better priors by accumulating test outcomes in similar 
 
 </details>
 """, unsafe_allow_html=True)
+# --- Time-Based Test Planning ---
+st.markdown("---")
+st.header("⏱️ Time-Based Test Planning")
+
+st.markdown("""
+Use this section to estimate how long your test will take, or what uplift you can detect based on how long you're able to run the test.
+""")
+
+# Input: Total expected traffic per week (before splitting)
+weekly_traffic = st.number_input(
+    "Estimated total weekly traffic (users hitting the test)",
+    min_value=100,
+    value=10000,
+    step=100
+)
+
+# Option: Fixed test duration
+test_duration_weeks = st.number_input(
+    "Test duration (weeks)",
+    min_value=1,
+    value=3,
+    step=1
+)
+
+# Option A: Estimate duration from sample size
+if mode == "Estimate Sample Size":
+    required_sample_size = None
+    try:
+        required_sample_size = x_vals[-1]  # already computed from simulate_power
+        users_per_week_per_variant = weekly_traffic / 2  # 50/50 split
+        estimated_weeks = required_sample_size / users_per_week_per_variant
+
+        st.subheader("🧮 Duration Estimate")
+        st.success(f"To collect {required_sample_size:,} users per variant, you need approx. **{estimated_weeks:.1f} weeks** of testing.")
+    except:
+        pass
+
+# Option B: Estimate max sample size from time cap
+max_total_users = weekly_traffic * test_duration_weeks
+max_per_variant = max_total_users // 2
+
+st.subheader("🎯 Max Sample Size From Time Cap")
+st.write(f"With {weekly_traffic:,} users/week and a test duration of {test_duration_weeks} weeks:")
+st.info(f"➡️ You can test up to **{max_per_variant:,} users per variant**")
+
+# Optional: Link directly to MDE calculator flow
+if mode == "Estimate MDE":
+    st.markdown("---")
+    st.subheader("🔍 Re-estimate MDE using time-limited sample size")
+    if st.button("Recalculate MDE with max sample size"):
+        time_limited_results = simulate_mde(
+            p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, max_per_variant
+        )
+        u_vals, p_vals = zip(*time_limited_results)
+
+        if p_vals[-1] >= desired_power:
+            st.success(f"✅ Minimum detectable uplift (within time/traffic limit): {u_vals[-1]:.2%}")
+        else:
+            st.warning("Could not reach target power with this sample size. Try increasing test duration or traffic.")
+
+        # Plot
+        plt.figure(figsize=(8, 4))
+        plt.plot(u_vals, p_vals, marker='o')
+        plt.axhline(desired_power, color='red', linestyle='--', label='Target Power')
+        plt.xlabel("Uplift")
+        plt.ylabel("Power")
+        plt.title("Power vs Uplift with Time-Limited Sample Size")
+        plt.grid(True)
+        plt.legend()
+        st.pyplot(plt)
+
+        # Summary Box
+        st.markdown("### 📝 Summary")
+        st.write(f"- **Traffic/week**: {weekly_traffic:,} users")
+        st.write(f"- **Test duration**: {test_duration_weeks} weeks")
+        st.write(f"- **Max users per variant**: {max_per_variant:,}")
+        st.write(f"- **Threshold**: {thresh:.2f}, **Target Power**: {desired_power:.0%}")
+        st.write(f"- **Minimum detectable uplift**: {u_vals[-1]:.2%}")
+
+st.caption("You can plug this value into the Minimum Detectable Effect (MDE) estimator to see what uplift you'd be able to detect within this traffic/time budget.")
