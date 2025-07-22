@@ -30,7 +30,7 @@ def run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, t
     return power
 
 @st.cache_data
-def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior):
+def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, max_sample_size):
     """
     Simulates power across a range of sample sizes to find the minimum
     sample size required to achieve the desired power.
@@ -41,7 +41,8 @@ def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alp
         return [(0, 0)]
 
     results = []
-    sample_sizes = np.unique(np.logspace(2, 5, 20).astype(int))
+    # Use the configurable max_sample_size
+    sample_sizes = np.unique(np.logspace(2, np.log10(max_sample_size), 20).astype(int))
 
     with st.spinner("Running simulations for sample size..."):
         for n in sample_sizes:
@@ -52,13 +53,14 @@ def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alp
     return results
 
 @st.cache_data
-def simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n):
+def simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n, max_uplift):
     """
     Simulates power across a range of uplifts (MDEs) for a fixed sample size
     to find the minimum detectable effect.
     """
     results = []
-    uplifts = np.linspace(0.01, 0.40, 20) 
+    # Use the configurable max_uplift
+    uplifts = np.linspace(0.01, max_uplift, 20)
 
     with st.spinner("Running simulations for MDE..."):
         for uplift in uplifts:
@@ -146,6 +148,13 @@ else:
         help="Prior belief in failures before the test."
     )
 
+# --- Advanced Options ---
+st.sidebar.markdown("---")
+with st.sidebar.expander("Advanced Options"):
+    max_sample_size = st.number_input("Max Sample Size to Simulate", min_value=1000, max_value=1000000, value=100000, step=1000)
+    max_uplift = st.slider("Max Uplift to Simulate", min_value=0.1, max_value=1.0, value=0.4, step=0.05, format="%.2f")
+
+
 # --- App Body ---
 st.title("Bayesian A/B Pre-Test Calculator")
 
@@ -153,52 +162,58 @@ results_available = False
 if st.button("Run Calculation"):
 
     if mode == "Estimate Sample Size":
-        results = simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior)
+        results = simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, max_sample_size)
         if len(results) > 1 or (len(results) == 1 and results[0][1] > 0):
             x_vals, y_vals = zip(*results)
             results_available = True
-    
+
             st.subheader("📈 Sample Size Estimation")
             st.write(f"**Baseline Conversion Rate:** {p_A:.2%}")
             st.write(f"**Expected Uplift:** {uplift:.2%}")
             st.write(f"**Posterior Threshold:** {thresh:.2f}")
             st.write(f"**Target Power:** {desired_power:.0%}")
             st.write(f"**Priors Used:** Alpha = {alpha_prior:.1f}, Beta = {beta_prior:.1f}")
-    
+
             if y_vals[-1] >= desired_power:
-                st.success(f"✅ Estimated minimum sample size per group: **{x_vals[-1]:,}**")
+                st.success(
+                    f"✅ Estimated minimum sample size per group: **{x_vals[-1]:,}** "
+                    f"(achieved {y_vals[-1]:.1%} power)."
+                )
             else:
-                st.warning("Test did not reach desired power within simulation limits. Try increasing the max sample size range or lowering power target.")
-    
+                st.warning("Test did not reach desired power within simulation limits. Try increasing the max sample size in Advanced Options.")
+
             st.markdown("""
             ### 📊 What This Means
             This chart shows how sample size impacts your ability to detect the expected uplift.
             The red line shows your required power (e.g. 80%). Where the curve crosses this line is the recommended sample size.
             """)
     else: # Estimate MDE Mode
-        results = simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n)
+        results = simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n, max_uplift)
         if len(results) > 1 or (len(results) == 1 and results[0][1] > 0):
             x_vals, y_vals = zip(*results)
             results_available = True
-    
+
             st.subheader("📉 Minimum Detectable Effect (MDE)")
             st.write(f"**Baseline Conversion Rate:** {p_A:.2%}")
             st.write(f"**Sample Size per Group:** {fixed_n:,}")
             st.write(f"**Posterior Threshold:** {thresh:.2f}")
             st.write(f"**Target Power:** {desired_power:.0%}")
             st.write(f"**Priors Used:** Alpha = {alpha_prior:.1f}, Beta = {beta_prior:.1f}")
-    
+
             if y_vals[-1] >= desired_power:
-                st.success(f"✅ Minimum detectable relative uplift: **{x_vals[-1]:.2%}**")
+                st.success(
+                    f"✅ Minimum detectable relative uplift: **{x_vals[-1]:.2%}** "
+                    f"(achieved {y_vals[-1]:.1%} power)."
+                )
             else:
-                st.warning("Simulation did not reach target power. Try increasing sample size or simulations, or check if the uplift range is realistic.")
-    
+                st.warning("Simulation did not reach target power. Try increasing sample size, simulations, or the max uplift range in Advanced Options.")
+
             st.markdown("""
             ### 📊 What This Means
             This chart shows how much uplift your test can reliably detect given your fixed sample size.
             The red line shows your required power (e.g. 80%). Where the curve crosses this line is your minimum detectable effect.
             """)
-    
+
     # --- Plotting (now inside the button click logic) ---
     if results_available:
         fig, ax = plt.subplots(figsize=(8, 4))
@@ -218,7 +233,6 @@ if st.button("Run Calculation"):
         st.pyplot(fig)
 
 
-# --- Conceptual Explanation ---
 # --- Conceptual Explanation ---
 st.markdown("---")
 with st.expander("ℹ️ Learn about the concepts used in this calculator"):
