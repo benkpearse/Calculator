@@ -219,43 +219,43 @@ if st.button("Run Calculation"):
 
 
 # --- Conceptual Explanation ---
+# --- Conceptual Explanation ---
 st.markdown("---")
 with st.expander("ℹ️ Learn about the concepts used in this calculator"):
     st.markdown("""
-#### What is Sample Size? 👥
-**Sample size** is the number of users in each group of your test (e.g., 10,000 in control, 10,000 in variant). It's the main dial you can turn to adjust your test's sensitivity.
+    #### What is Sample Size? 👥
+    **Sample size** is the number of users in each group of your test. Think of it like the lens on a camera you're using to see which variant is better. A bigger sample size gives you a bigger, more powerful lens.
 
-Think of your A/B test as trying to take a picture of a distant star. The sample size (number of users) is the size of your camera lens.
+    This bigger lens makes your test more sensitive in two key ways:
 
-A larger sample size reduces the effect of random noise, giving you a clearer, more precise measurement of each variant's true performance. This increased clarity improves your test in two related ways:
+    1.  **You can spot smaller improvements (Lower MDE 🔎)**
+        A powerful camera lens (**more users**) can spot a tiny, faint star that a weaker lens would miss. Similarly, a larger sample size allows you to reliably detect a very **small uplift (a lower MDE)**.
 
-You can see smaller objects (Lower MDE)
-A bigger lens (more users) lets you resolve finer details. You can now reliably detect a very faint star (a smaller effect) that would have been invisible to a smaller lens. This is why more users lead to a lower MDE.
+    2.  **You're more certain about what you see (Higher Power 💪)**
+        When you're trying to photograph a specific star, a bigger lens (**more users**) gives you a much better chance (**higher power**) of capturing a sharp, undeniable photo instead of a blurry, inconclusive smudge.
 
-You get a clearer picture of the object you're looking for (Higher Power)
-If you're focused on one specific star (a specific expected uplift), that same big lens (more users) gives you a much better chance (higher power) of capturing a sharp, undeniable photo of it, rather than a blurry, inconclusive smudge.
+    The goal is to find the right balance—a lens big enough to be confident in the result, but not so big that you waste time and resources.
 
-In short, Power and MDE are two sides of the same coin: test sensitivity. Increasing your sample size makes your test more sensitive overall.
+    ---
+    #### What is Minimum Detectable Effect (MDE)? 🔎
+    The **Minimum Detectable Effect (MDE)** is the smallest improvement your test can reliably detect at a given power level.
 
----
-#### What is Minimum Detectable Effect (MDE)? 🔎
-The **Minimum Detectable Effect (MDE)** is the smallest improvement your test can reliably detect at a given power level.
+    Think of it as the sensitivity of your experiment. If the true uplift from your change is smaller than the MDE, your test will likely miss it. This doesn't mean the uplift isn't real, just that your experiment isn't powerful enough to see it. Use the MDE to set realistic expectations for what your test can achieve with your available traffic.
 
-Think of it as the sensitivity of your experiment. If the true uplift from your change is smaller than the MDE, your test will likely miss it. This doesn't mean the uplift isn't real, just that your experiment isn't powerful enough to see it. Use the MDE to set realistic expectations for what your test can achieve with your available traffic.
+    ---
+    #### What is Bayesian Power? 💪
+    **Power** answers one critical question: *"If my variant is truly better by a specific amount, what's the probability my test will actually detect it?"*
 
----
-#### What is Bayesian Power? 💪
-**Power** answers one critical question: *"If my variant is truly better by a specific amount, what's the probability my test will actually detect it?"*
+    For example, 80% power means you have an 80% chance of getting a conclusive result (e.g., P(B > A) > 95%) if the real improvement matches what you expected. Running a test with low power is like trying to read in a dim room—you're likely to miss things and end up with an inconclusive result, wasting valuable traffic.
 
-For example, 80% power means you have an 80% chance of getting a conclusive result (e.g., P(B > A) > 95%) if the real improvement matches what you expected. Running a test with low power is like trying to read in a dim room—you're likely to miss things and end up with an inconclusive result, wasting valuable traffic.
+    ---
+    #### What are Priors? 🧠
+    **Priors** represent what you believe about the conversion rate *before* the test begins. In this model, your belief is captured by two numbers:
+    - **Alpha ($$\\alpha$$)**: The number of prior "successes".
+    - **Beta ($$\\beta$$)**: The number of prior "failures".
 
----
-#### What are Priors? 🧠
-**Priors** represent what you believe about the conversion rate *before* the test begins. In this model, your belief is captured by two numbers:
-- **Alpha ($$\\alpha$$)**: The number of prior "successes".
-- **Beta ($$\\beta$$)**: The number of prior "failures".
+    * **No strong belief?** Use an **uninformative prior** like `alpha = 1` and `beta = 1`. This treats all possible conversion rates as equally likely to start.
+    * **Have historical data?** Create an **informative prior**. If past data showed 50 conversions from 1,000 users, you'd set `alpha = 50` and `beta = 950`.
 
-* **No strong belief?** Use an **uninformative prior** like `alpha = 1` and `beta = 1`. This treats all possible conversion rates as equally likely to start.
-* **Have historical data?** Create an **informative prior**. If past data showed 50 conversions from 1,000 users, you'd set `alpha = 50` and `beta = 950`.
-
-As your test collects new data, the evidence from the experiment will quickly outweigh the initial prior belief.""")
+    As your test collects new data, the evidence from the experiment will quickly outweigh the initial prior belief.
+    """)
