@@ -41,7 +41,6 @@ def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alp
         return [(0, 0)]
 
     results = []
-    # Use the configurable max_sample_size
     sample_sizes = np.unique(np.logspace(2, np.log10(max_sample_size), 20).astype(int))
 
     with st.spinner("Running simulations for sample size..."):
@@ -59,7 +58,6 @@ def simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, 
     to find the minimum detectable effect.
     """
     results = []
-    # Use the configurable max_uplift
     uplifts = np.linspace(0.01, max_uplift, 20)
 
     with st.spinner("Running simulations for MDE..."):
@@ -231,6 +229,40 @@ if st.button("Run Calculation"):
         ax.grid(True, which="both", ls="--", c='0.7')
         ax.legend()
         st.pyplot(fig)
+
+# --- Time-Based Planning (NEW SECTION) ---
+st.markdown("---")
+st.header("⏱️ Time-Based Planning")
+st.markdown("Use this section to translate your sample size requirements into a real-world timeline.")
+
+weekly_traffic = st.number_input(
+    "Estimated total weekly traffic to the experiment",
+    min_value=1,
+    value=20000,
+    step=100,
+    help="Enter the total number of users you expect to enter the experiment each week (before the 50/50 split)."
+)
+
+# This section will only show its output after a calculation has been run
+if results_available:
+    st.subheader("🗓️ Duration Estimate")
+    users_per_week_per_variant = weekly_traffic / 2
+
+    if users_per_week_per_variant > 0:
+        if mode == "Estimate Sample Size":
+            # Check if a valid sample size was found
+            if 'y_vals' in locals() and y_vals[-1] >= desired_power:
+                required_sample_size = x_vals[-1]
+                estimated_weeks = required_sample_size / users_per_week_per_variant
+                st.info(f"To reach the required **{required_sample_size:,} users per variant**, you'll need to run this test for approximately **{estimated_weeks:.1f} weeks**.")
+            else:
+                st.warning("Cannot estimate duration because the target power was not reached. Adjust parameters and re-run.")
+        else: # MDE Mode
+            required_sample_size = fixed_n
+            estimated_weeks = required_sample_size / users_per_week_per_variant
+            st.info(f"To reach your fixed sample size of **{required_sample_size:,} users per variant**, it will take approximately **{estimated_weeks:.1f} weeks**.")
+    else:
+        st.warning("Please enter a valid weekly traffic number to estimate test duration.")
 
 
 # --- Conceptual Explanation ---
