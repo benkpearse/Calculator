@@ -254,4 +254,3 @@ with st.expander("ℹ️ Learn about the concepts used in this calculator"):
 
     Using good priors makes your tests more data-efficient.
     """)
-```
