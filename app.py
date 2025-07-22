@@ -13,16 +13,19 @@ def run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, t
     n_A = n
     n_B = n
 
-    conversions_A = np.random.binomial(n_A, p_A, size=simulations)
-    conversions_B = np.random.binomial(n_B, p_B, size=simulations)
+    # Use a fixed random seed for reproducible binomial sampling
+    rng = np.random.default_rng(seed=42)
+    conversions_A = rng.binomial(n_A, p_A, size=simulations)
+    conversions_B = rng.binomial(n_B, p_B, size=simulations)
 
     alpha_post_A = alpha_prior + conversions_A
     beta_post_A = beta_prior + n_A - conversions_A
     alpha_post_B = alpha_prior + conversions_B
     beta_post_B = beta_prior + n_B - conversions_B
 
-    post_samples_A = beta.rvs(alpha_post_A, beta_post_A, size=(samples, simulations))
-    post_samples_B = beta.rvs(alpha_post_B, beta_post_B, size=(samples, simulations))
+    # Use a fixed random seed for reproducible posterior sampling
+    post_samples_A = beta.rvs(alpha_post_A, beta_post_A, size=(samples, simulations), random_state=42)
+    post_samples_B = beta.rvs(alpha_post_B, beta_post_B, size=(samples, simulations), random_state=43) # Use a different seed for B
 
     prob_B_better = np.mean(post_samples_B > post_samples_A, axis=0)
 
