@@ -34,7 +34,7 @@ def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alp
     """
     Simulates power across a range of sample sizes to find the minimum
     sample size required to achieve the desired power.
-    This version now dynamically searches for the sample size.
+    This version now dynamically searches for the sample size up to a generous limit.
     """
     p_B = p_A * (1 + uplift)
     if p_B > 1.0:
@@ -44,11 +44,10 @@ def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alp
     results = []
     n = 100  # Start with a small sample size
     power = 0
-    max_iterations = 30  # Safety break to prevent infinite loops
-    iterations = 0
+    MAX_SAMPLE_SIZE = 5_000_000  # Safety break to prevent extremely long runs
 
     with st.spinner("Searching for required sample size... This may take a moment."):
-        while power < desired_power and iterations < max_iterations:
+        while power < desired_power and n < MAX_SAMPLE_SIZE:
             power = run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, thresh)
             results.append((n, power))
             
@@ -62,8 +61,6 @@ def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alp
                 n = int(n * 1.5)
             else:
                 n = int(n * 1.25)
-            
-            iterations += 1
             
     return results
 
