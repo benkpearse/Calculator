@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 
 # --- Core Simulation Functions ---
 
-# Decorator moved from here
 def run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, thresh):
     """
     Runs a single set of simulations for a given sample size and conversion rates.
@@ -30,7 +29,7 @@ def run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, t
     power = np.mean(prob_B_better > thresh)
     return power
 
-@st.cache_data # Decorator added here for more efficient caching
+@st.cache_data
 def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior):
     """
     Simulates power across a range of sample sizes to find the minimum
@@ -52,7 +51,7 @@ def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alp
                 break
     return results
 
-@st.cache_data # Decorator added here for more efficient caching
+@st.cache_data
 def simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n):
     """
     Simulates power across a range of uplifts (MDEs) for a fixed sample size
@@ -223,6 +222,15 @@ if st.button("Run Calculation"):
 st.markdown("---")
 with st.expander("ℹ️ Learn about the concepts used in this calculator"):
     st.markdown("""
+    #### What is Sample Size?
+    **Sample size** is the number of users or observations included in each variant of your test (e.g., 10,000 users see the control, and 10,000 see the new version). It is the primary factor you can control to influence the sensitivity of your experiment.
+
+    - A **larger sample size** increases your test's **power**, making it more likely to detect a real effect.
+    - It also allows you to detect a smaller **Minimum Detectable Effect (MDE)**.
+
+    The main trade-off is cost: collecting a larger sample size takes more time and traffic. This calculator helps you find the "Goldilocks" number — a sample size large enough to give you confidence in the result without running the test for longer than necessary.
+
+    ---
     #### What is Minimum Detectable Effect (MDE)?
     **Minimum Detectable Effect (MDE)** tells you the smallest improvement (uplift) your test is likely to detect with a given amount of data and a desired level of power. If the true uplift is smaller than the MDE, you probably won’t find a statistically significant result, not because the uplift isn't real, but because your test isn't sensitive enough. Use MDE to set realistic expectations: if your calculated MDE is 5%, don’t expect to reliably detect a 2% improvement.
 
