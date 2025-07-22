@@ -222,32 +222,34 @@ if st.button("Run Calculation"):
 st.markdown("---")
 with st.expander("ℹ️ Learn about the concepts used in this calculator"):
     st.markdown("""
-    #### What is Sample Size?
-    **Sample size** is the number of users or observations included in each variant of your test (e.g., 10,000 users see the control, and 10,000 see the new version). It is the primary factor you can control to influence the sensitivity of your experiment.
+#### What is Sample Size? 👥
+**Sample size** is the number of users in each group of your test (e.g., 10,000 in control, 10,000 in variant). It's the main dial you can turn to adjust your test's sensitivity.
 
-    - A **larger sample size** increases your test's **power**, making it more likely to detect a real effect.
-    - It also allows you to detect a smaller **Minimum Detectable Effect (MDE)**.
+The relationships are simple:
+- **More users** ➡️ **Higher Power** (you're more likely to find a real winner).
+- **More users** ➡️ **Lower MDE** (you can reliably detect smaller improvements).
 
-    The main trade-off is cost: collecting a larger sample size takes more time and traffic. This calculator helps you find the "Goldilocks" number — a sample size large enough to give you confidence in the result without running the test for longer than necessary.
+The goal is to find the right balance. You need enough users to be confident in the result, but not so many that you waste time and traffic. This calculator helps you find that sweet spot.
 
-    ---
-    #### What is Minimum Detectable Effect (MDE)?
-    **Minimum Detectable Effect (MDE)** tells you the smallest improvement (uplift) your test is likely to detect with a given amount of data and a desired level of power. If the true uplift is smaller than the MDE, you probably won’t find a statistically significant result, not because the uplift isn't real, but because your test isn't sensitive enough. Use MDE to set realistic expectations: if your calculated MDE is 5%, don’t expect to reliably detect a 2% improvement.
+---
+#### What is Minimum Detectable Effect (MDE)? 🔎
+The **Minimum Detectable Effect (MDE)** is the smallest improvement your test can reliably detect at a given power level.
 
-    ---
-    #### What Does Power Mean in Bayesian A/B Testing?
-    In this context, Bayesian power answers the question: **"If the true uplift is X%, what is the probability that our test will correctly conclude that the variant is better than the control?"** We define "correctly conclude" as the posterior probability `P(B > A)` exceeding our chosen confidence threshold (e.g., 95%). For example, 80% power means that if the true uplift really exists, 80% of the time we run this test, we'll get a significant result. This helps you avoid launching tests that are underpowered and likely to fail from the start.
+Think of it as the sensitivity of your experiment. If the true uplift from your change is smaller than the MDE, your test will likely miss it. This doesn't mean the uplift isn't real, just that your experiment isn't powerful enough to see it. Use the MDE to set realistic expectations for what your test can achieve with your available traffic.
 
-    ---
-    #### About Priors in Bayesian A/B Testing
-    Priors represent your beliefs about the conversion rate *before* running the test. A **Beta prior** is defined by two shape parameters:
-    - **Alpha ($$\\alpha$$)**: Represents prior successes.
-    - **Beta ($$\\beta$$)**: Represents prior failures.
+---
+#### What is Bayesian Power? 💪
+**Power** answers one critical question: *"If my variant is truly better by a specific amount, what's the probability my test will actually detect it?"*
 
-    * **Uninformative Prior**: If you have no strong prior belief, use `alpha = 1` and `beta = 1`. This is a uniform prior, meaning all conversion rates are considered equally likely initially.
-    * **Informative Prior**: If you have historical data, you can encode it. For `1,000` historical observations and a `5%` conversion rate, your priors would be:
-        - `alpha = 1000 * 0.05 = 50`
-        - `beta = 1000 * (1 - 0.05) = 950`
+For example, 80% power means you have an 80% chance of getting a conclusive result (e.g., P(B > A) > 95%) if the real improvement matches what you expected. Running a test with low power is like trying to read in a dim room—you're likely to miss things and end up with an inconclusive result, wasting valuable traffic.
 
-    Using good priors makes your tests more data-efficient.
-    """)
+---
+#### What are Priors? 🧠
+**Priors** represent what you believe about the conversion rate *before* the test begins. In this model, your belief is captured by two numbers:
+- **Alpha ($$\\alpha$$)**: The number of prior "successes".
+- **Beta ($$\\beta$$)**: The number of prior "failures".
+
+* **No strong belief?** Use an **uninformative prior** like `alpha = 1` and `beta = 1`. This treats all possible conversion rates as equally likely to start.
+* **Have historical data?** Create an **informative prior**. If past data showed 50 conversions from 1,000 users, you'd set `alpha = 50` and `beta = 950`.
+
+As your test collects new data, the evidence from the experiment will quickly outweigh the initial prior belief.""")
