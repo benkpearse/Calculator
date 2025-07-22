@@ -110,8 +110,8 @@ desired_power = st.sidebar.slider(
 )
 simulations = st.sidebar.slider(
     "Simulations", 100, 2000, 300, step=100,
-    help="How many test simulations to run"
-)
+    help="How many test simulations to run")
+
 samples = st.sidebar.slider(
     "Posterior samples", 500, 3000, 1000, step=100,
     help="How many samples to draw from each posterior distribution"
