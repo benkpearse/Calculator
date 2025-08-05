@@ -106,47 +106,45 @@ st.markdown("Choose Bayesian (simulation) or Frequentist (formula) to estimate r
 # Sidebar form
 with st.sidebar.form("params_form"):
     st.header("1. Method & Inputs")
-    methodology = st.radio("Methodology", ["Bayesian", "Frequentist"], horizontal=True)
-    mode = st.radio("Planning Mode", ["Estimate Sample Size", "Estimate MDE"], horizontal=True)
+    methodology = st.radio("Methodology", ["Bayesian", "Frequentist"], horizontal=True, help="Choose the statistical approach for the calculation.")
+    mode = st.radio("Planning Mode", ["Estimate Sample Size", "Estimate MDE"], horizontal=True, help="Choose whether to solve for sample size or for the minimum detectable effect.")
     
-    p_A = st.number_input("Baseline rate (p_A)", 0.0001, 0.999, 0.05, 0.001, format="%.4f")
+    p_A = st.number_input("Baseline rate (p_A)", 0.0001, 0.999, 0.05, 0.001, format="%.4f", help="The conversion rate of your control group (e.g., 0.05 for 5%).")
     
     if mode == "Estimate Sample Size":
-        uplift = st.number_input("Expected uplift", 0.0001, 0.999, 0.10, 0.01, format="%.4f")
+        uplift = st.number_input("Expected uplift", 0.0001, 0.999, 0.10, 0.01, format="%.4f", help="The relative improvement you expect to see (e.g., 0.10 for a 10% lift).")
     else: # MDE
-        fixed_n = st.number_input("Fixed sample size per variant", 100, value=10000, step=100)
+        fixed_n = st.number_input("Fixed sample size per variant", 100, value=10000, step=100, help="The number of users you have available for each group.")
 
     if methodology == "Bayesian":
         st.subheader("Bayesian Settings")
-        thresh = st.slider("Posterior threshold", 0.8, 0.99, 0.95)
-        desired_power = st.slider("Desired Power", 0.5, 0.99, 0.8)
-        sims = st.slider("Simulations", 100, 2000, 500)
-        samples = st.slider("Posterior samples", 500, 3000, 1000)
-        use_hist = st.checkbox("Auto-priors from history")
+        thresh = st.slider("Posterior threshold", 0.8, 0.99, 0.95, help="The probability (P(B > A)) required to declare a winner.")
+        desired_power = st.slider("Desired Power", 0.5, 0.99, 0.8, help="The chance of detecting the uplift if it's real. 80% is common.")
+        sims = st.slider("Simulations", 100, 2000, 500, help="Number of simulated A/B tests to run. More is more accurate but slower.")
+        samples = st.slider("Posterior samples", 500, 3000, 1000, help="Samples drawn from the posterior distribution in each simulation.")
+        use_hist = st.checkbox("Auto-priors from history", help="Use historical data to create an informative prior.")
         if use_hist:
             hist_conv = st.number_input("Hist. successes", 0, value=50)
             hist_n = st.number_input("Hist. users", 1, value=1000)
             a0, b0 = hist_conv, hist_n - hist_conv
         else:
-            a0 = st.number_input("Alpha prior", 0.0, value=1.0)
-            b0 = st.number_input("Beta prior", 0.0, value=1.0)
+            a0 = st.number_input("Alpha prior", 0.0, value=1.0, help="Prior belief in successes (default is 1).")
+            b0 = st.number_input("Beta prior", 0.0, value=1.0, help="Prior belief in failures (default is 1).")
     else: # Frequentist
         st.subheader("Frequentist Settings")
-        alpha = st.slider("Significance α", 0.01, 0.10, 0.05)
-        desired_power = st.slider("Desired Power", 0.5, 0.99, 0.8)
+        alpha = st.slider("Significance α", 0.01, 0.10, 0.05, help="Your tolerance for a false positive. 0.05 is standard for 95% confidence.")
+        desired_power = st.slider("Desired Power (1-β)", 0.5, 0.99, 0.8, help="The chance of detecting the uplift if it's real. 80% is common.")
 
     st.header("2. Duration & Geo Spend")
-    weekly_traffic = st.number_input("Weekly traffic", 1, 100000, 20000)
-    calculate_geo_spend = st.checkbox("Calculate Geo Spend", value=False)
+    weekly_traffic = st.number_input("Weekly traffic", 1, 100000, 20000, help="Total users entering the experiment each week (before the 50/50 split).")
+    calculate_geo_spend = st.checkbox("Calculate Geo Spend", value=False, help="Enable to plan ad spend for a geo-based test.")
     
-    # --- NEW: Geo Spend configuration moved inside the form ---
     if calculate_geo_spend and methodology == "Frequentist":
         with st.expander("Configure Geo Spend Data"):
-            spend_mode = st.radio("Spend Weighting Mode", ["Population-based", "Equal", "Custom"], index=1, horizontal=True)
+            spend_mode = st.radio("Weighting Mode", ["Population-based", "Equal", "Custom"], index=0, horizontal=True, help="Choose how to distribute the sample size across regions.")
             
             if spend_mode == "Custom":
                 st.caption("Edit regional weights and CPMs as needed.")
-                # Use session state to persist the edited dataframe
                 if 'geo_df_custom' not in st.session_state:
                     st.session_state.geo_df_custom = build_geo_df(UK_REGIONS, POP_WEIGHTS, DEFAULT_CPMS)
                 
@@ -157,9 +155,8 @@ with st.sidebar.form("params_form"):
 
 if submit:
     st.header("Results")
-    req_n = None # Initialize req_n
+    req_n = None
     
-    # --- Main Calculation Logic ---
     if methodology == "Frequentist":
         if mode == "Estimate Sample Size":
             req_n = calculate_sample_size_frequentist(p_A, uplift, desired_power, alpha)
@@ -195,7 +192,6 @@ if submit:
             else:
                 st.warning("Could not reach desired power.")
 
-    # --- Geo Spend Display Logic ---
     if calculate_geo_spend and methodology == "Frequentist" and req_n:
         st.subheader("💰 Geo Ad Spend")
         if spend_mode == "Equal":
@@ -206,7 +202,7 @@ if submit:
             geo_df = st.session_state.geo_df_custom
             if not np.isclose(geo_df["Weight"].sum(), 1.0):
                 st.error("Custom weights must sum to 1.0. Please adjust in the sidebar.")
-                geo_df = pd.DataFrame() # Prevent calculation with invalid weights
+                geo_df = pd.DataFrame()
 
         if not geo_df.empty:
             total_users = req_n * 2
@@ -222,7 +218,6 @@ if submit:
             ax.set_title("Geo Spend Breakdown")
             st.pyplot(fig)
 
-    # --- Duration & Power Curve ---
     if req_n:
         st.subheader("🗓️ Estimated Test Duration")
         weeks = req_n / (weekly_traffic/2)
@@ -235,10 +230,11 @@ if submit:
         valid_uplifts = [u for u in uplifts if u > 0 and p_A*(1+u)<=1]
         fig2, ax2 = plt.subplots()
         ax2.plot([u*100 for u in valid_uplifts], sizes)
-        ax2.axvline(uplift*100, linestyle='--')
-        ax2.set_xlabel("Uplift %")
+        ax2.axvline(uplift*100, linestyle='--', color='red', label=f"Your Target ({uplift:.1%})")
+        ax2.set_xlabel("Uplift (%)")
         ax2.set_ylabel("Sample Size per Variant")
         ax2.set_title("Sample Size vs Uplift")
+        ax2.legend()
         st.pyplot(fig2)
 
 else:
@@ -249,22 +245,13 @@ st.markdown("---")
 with st.expander("ℹ️ About the Methodologies & Geo Testing"):
     st.markdown("""
     #### Bayesian vs. Frequentist Approaches
-    This tool offers two different statistical philosophies for power analysis.
-
-    **1. Bayesian (Simulation-Based)**
-    - **What it is:** A modern approach that uses simulation to answer the question: *"If the true uplift is X%, what is the probability that our test will conclude that the variant is better?"*
-    - **Pros:** More intuitive, flexible, and allows for the incorporation of prior knowledge from past experiments to make the analysis more data-efficient.
-    - **Use when:** You want a more nuanced view of risk and probability, or when you have historical data to inform your assumptions.
-
-    **2. Frequentist (Formula-Based)**
-    - **What it is:** The traditional method taught in most statistics courses. It uses a mathematical formula based on a two-sided Z-test to calculate the sample size needed to achieve a desired level of statistical significance (`alpha`) and power (`1-beta`).
-    - **Pros:** Very fast, deterministic (always gives the same answer), and widely understood.
-    - **Use when:** You need a quick, standard calculation or when your organization's standard is to use p-values and significance testing.
+    - **Bayesian (Simulation-Based):** A modern approach that answers: *"What is the probability that my variant is better?"* It's intuitive and allows for the use of prior knowledge from past tests.
+    - **Frequentist (Formula-Based):** The traditional method that uses p-values and significance levels (`alpha`). It's fast, deterministic, and widely understood.
     
     ---
     #### About Geo Testing Ad Spend
-    Geo testing is used for channels where you can't randomize individual users, such as TV, radio, or print advertising. Instead, you randomize by geographic region (e.g., showing an ad in London but not in Manchester).
-    - **How it works:** This calculator takes the total sample size required for your test and distributes it across different UK regions based on their population weights.
-    - **Editable CPMs:** You can edit the default Cost Per Mille (CPM, cost per 1000 impressions) values in the sidebar to match your media plan.
-    - **The Output:** The final table and chart show the estimated ad spend required in each region to acquire the necessary number of users to run a properly powered test.
+    Geo testing is for channels where you can't randomize individual users (e.g., TV, radio). Instead, you randomize by geographic region.
+    - **How it works:** This calculator takes the total required sample size and distributes it across regions. You can use an equal split, a split based on population, or a fully custom split.
+    - **Editable CPMs:** You can edit the Cost Per Mille (CPM) for each region in "Custom" mode to match your media plan.
+    - **The Output:** The final table and chart show the estimated ad spend required in each region to run a properly powered test.
     """)
