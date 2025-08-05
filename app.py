@@ -12,56 +12,37 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Core Calculation Functions (Bayesian Engine Rebuilt) ---
+# --- Core Calculation Functions (Unchanged) ---
 @st.cache_data
 def run_simulation(n: int, p_A: float, p_B: float, simulations: int, samples: int, alpha_prior: float, beta_prior: float, num_variants: int) -> float:
-    """
-    Runs a statistically correct multi-variant Bayesian simulation.
-    Power is defined as the probability of correctly identifying the best variant.
-    """
     rng = np.random.default_rng(seed=42)
     true_rates = [p_A] + [p_B] + [p_A] * (num_variants - 1)
-    
     post_samples_all_groups = []
     for rate in true_rates:
         conversions = rng.binomial(n, rate, size=simulations)
-        alpha_post = alpha_prior + conversions
-        beta_post = beta_prior + n - conversions
-        post_samples = beta.rvs(alpha_post, beta_post, size=(samples, simulations), random_state=rng)
-        post_samples_all_groups.append(post_samples)
-        
+        alpha_post, beta_post = alpha_prior + conversions, beta_prior + n - conversions
+        post_samples_all_groups.append(beta.rvs(alpha_post, beta_post, size=(samples, simulations), random_state=rng))
     stacked_samples = np.stack(post_samples_all_groups)
     best_variant_indices = np.argmax(stacked_samples, axis=0)
-    
-    power = np.mean(best_variant_indices == 1)
-    return power
+    return np.mean(best_variant_indices == 1)
 
 @st.cache_data
 def simulate_power(p_A: float, uplift: float, desired_power: float, simulations: int, samples: int, alpha_prior: float, beta_prior: float, num_variants: int) -> List[Tuple[int, float]]:
-    """
-    Finds the required sample size for a Bayesian test using an adaptive
-    search followed by a binary search refinement.
-    """
     p_B = p_A * (1 + uplift)
     if p_B > 1.0: return []
-    
     results, n, power, MAX_SAMPLE_SIZE = [], 100, 0, 5_000_000
     n_lower, n_upper = 0, 0
-    
     with st.spinner("Stage 1/2: Finding approximate sample size range..."):
         while power < desired_power and n < MAX_SAMPLE_SIZE:
             power = run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, num_variants)
             results.append((n, power))
             if power >= desired_power:
-                n_upper = n
-                n_lower = results[-2][0] if len(results) > 1 else n // 2
+                n_upper, n_lower = n, (results[-2][0] if len(results) > 1 else n // 2)
                 break
             if n < 1000: n += 100
             elif n < 20000: n = int(n * 1.5)
             else: n = int(n * 1.25)
-
     if n_upper == 0: return results
-
     with st.spinner(f"Stage 2/2: Refining sample size between {n_lower:,} and {n_upper:,}..."):
         for _ in range(5):
             n_mid = (n_lower + n_upper) // 2
@@ -70,13 +51,11 @@ def simulate_power(p_A: float, uplift: float, desired_power: float, simulations:
             results.append((n_mid, power_mid))
             if power_mid >= desired_power: n_upper = n_mid
             else: n_lower = n_mid
-    
     final_results = sorted([res for res in results if res[1] >= desired_power], key=lambda x: x[0])
     return final_results if final_results else results
 
 @st.cache_data
 def simulate_mde_bayesian(p_A: float, fixed_n: int, desired_power: float, simulations: int, samples: int, alpha_prior: float, beta_prior: float, num_variants: int) -> List[Tuple[float, float]]:
-    """Finds the Minimum Detectable Effect for a Bayesian test with a fixed sample size."""
     results = []
     with st.spinner("Running Bayesian MDE simulations..."):
         for uplift in np.linspace(0.01, 0.50, 25):
@@ -130,8 +109,9 @@ GEO_DEFAULTS = pd.DataFrame({
 })
 ALL_REGIONS = GEO_DEFAULTS["Region"].tolist()
 
-if 'selected_regions' not in st.session_state:
-    st.session_state.selected_regions = ALL_REGIONS
+def reset_app_state():
+    """Clears all session state variables to reset the app."""
+    st.session_state.clear()
 
 # --- UI ---
 st.title("⚙️ A/B/n Pre-Test Power Calculator")
@@ -139,64 +119,66 @@ st.title("⚙️ A/B/n Pre-Test Power Calculator")
 with st.expander("What is Power Analysis? Click here to learn more.", expanded=False):
     st.markdown("""...""") # Content unchanged
 
-with st.sidebar.form("params_form"):
-    st.header("1. Main Parameters")
-    num_variants = st.number_input("Number of Variants (excluding control)", min_value=1, max_value=10, value=1, help="An A/B test has 1 variant. An A/B/C test has 2 variants.")
-    methodology = st.radio("Methodology", ["Bayesian", "Frequentist"], horizontal=True, help="Choose the statistical approach.")
-    mode = st.radio("Planning Mode", ["Estimate Sample Size", "Estimate MDE"], horizontal=True, help="Solve for sample size or minimum detectable effect.")
-    p_A = st.number_input("Baseline rate (p_A)", 0.0001, 0.999, 0.05, 0.001, format="%.4f", help="Conversion rate of the control group.")
-    if mode == "Estimate Sample Size":
-        uplift = st.number_input("Expected uplift", 0.0001, 0.999, 0.10, 0.01, format="%.4f", help="Relative improvement you want to detect in the winning variant.")
-    else:
-        fixed_n = st.number_input("Fixed sample size per group", 100, value=10000, step=100, help="Users available for the control and EACH variant.")
-    if methodology == "Bayesian":
-        st.subheader("Bayesian Settings")
-        desired_power = st.slider("Desired Power", 0.5, 0.99, 0.8, help="The probability of correctly identifying the best performing variant.")
-        sims, samples = st.slider("Simulations", 100, 2000, 500), st.slider("Posterior samples", 500, 3000, 1000)
-    else:
-        st.subheader("Frequentist Settings")
-        alpha, desired_power = st.slider("Significance α (Family-wise)", 0.01, 0.10, 0.05, help="Overall chance of a false positive. Auto-adjusted for multiple comparisons."), st.slider("Desired Power (1-β)", 0.5, 0.99, 0.8)
-    
-    st.header("2. Optional Calculations")
-    estimate_duration = st.checkbox("Estimate Test Duration", value=True)
-    if estimate_duration:
-        weekly_traffic = st.number_input("Total weekly traffic for test", min_value=1, value=20000, help="All users entering the experiment, to be split across all groups.")
-    else:
-        weekly_traffic = 0
-    submit = st.form_submit_button("Run Calculation", type="primary")
+st.sidebar.button("Reset All Settings", on_click=reset_app_state, use_container_width=True)
+st.sidebar.markdown("---")
 
-st.sidebar.header("Geo Spend Configuration")
-calculate_geo_spend = st.sidebar.checkbox("Calculate Geo Spend", value=True, help="Enable to plan ad spend for a geo-based test.")
+st.sidebar.header("1. Main Parameters")
+num_variants = st.sidebar.number_input("Number of Variants (excluding control)", min_value=1, max_value=10, value=1, key='num_variants', help="An A/B test has 1 variant. An A/B/C test has 2 variants.")
+methodology = st.sidebar.radio("Methodology", ["Bayesian", "Frequentist"], horizontal=True, key='methodology', help="Choose the statistical approach.")
+mode = st.sidebar.radio("Planning Mode", ["Estimate Sample Size", "Estimate MDE"], horizontal=True, key='mode', help="Solve for sample size or minimum detectable effect.")
+p_A = st.sidebar.number_input("Baseline rate (p_A)", 0.0001, 0.999, 0.05, 0.001, format="%.4f", key='p_A', help="Conversion rate of the control group.")
+if mode == "Estimate Sample Size":
+    uplift = st.sidebar.number_input("Expected uplift", 0.0001, 0.999, 0.10, 0.01, format="%.4f", key='uplift', help="Relative improvement you want to detect in the winning variant.")
+else:
+    fixed_n = st.sidebar.number_input("Fixed sample size per group", 100, value=10000, step=100, key='fixed_n', help="Users available for the control and EACH variant.")
+if methodology == "Bayesian":
+    st.sidebar.subheader("Bayesian Settings")
+    desired_power = st.sidebar.slider("Desired Power", 0.5, 0.99, 0.8, key='desired_power_b', help="The probability of correctly identifying the best performing variant.")
+    sims = st.sidebar.slider("Simulations", 100, 2000, 500, key='sims')
+    samples = st.sidebar.slider("Posterior samples", 500, 3000, 1000, key='samples')
+else:
+    st.sidebar.subheader("Frequentist Settings")
+    alpha = st.sidebar.slider("Significance α (Family-wise)", 0.01, 0.10, 0.05, key='alpha', help="Overall chance of a false positive. Auto-adjusted for multiple comparisons.")
+    desired_power = st.sidebar.slider("Desired Power (1-β)", 0.5, 0.99, 0.8, key='desired_power_f')
+
+st.sidebar.header("2. Optional Calculations")
+estimate_duration = st.sidebar.checkbox("Estimate Test Duration", value=True, key='estimate_duration')
+if estimate_duration:
+    weekly_traffic = st.sidebar.number_input("Total weekly traffic for test", min_value=1, value=20000, key='weekly_traffic', help="All users entering the experiment, to be split across all groups.")
+else:
+    weekly_traffic = 0
+
+st.sidebar.header("3. Geo Spend Configuration")
+calculate_geo_spend = st.sidebar.checkbox("Calculate Geo Spend", value=True, key='calculate_geo_spend', help="Enable to plan ad spend for a geo-based test.")
 if calculate_geo_spend:
-    spend_mode = st.sidebar.radio("Weighting Mode", ["Population-based", "Equal", "Custom"], index=0, horizontal=True, help="How to distribute sample size across active regions.")
+    spend_mode = st.sidebar.radio("Weighting Mode", ["Population-based", "Equal", "Custom"], index=0, horizontal=True, key='spend_mode', help="How to distribute sample size across active regions.")
 
 if calculate_geo_spend:
     with st.expander("Configure Active Regions and Custom Data", expanded=False):
-        st.write("First, select regions, then click 'Confirm'. For 'Custom' mode, the editor will then appear.")
         with st.form("region_selection_form"):
             temp_selections = []
             cols = st.columns(3)
             for i, region in enumerate(ALL_REGIONS):
                 with cols[i % 3]:
-                    if st.checkbox(region, value=(region in st.session_state.selected_regions), key=f"check_{region}"):
+                    if st.checkbox(region, value=(region in st.session_state.get('selected_regions', ALL_REGIONS)), key=f"check_{region}"):
                         temp_selections.append(region)
             submitted = st.form_submit_button("Confirm Region Selection")
             if submitted:
                 st.session_state.selected_regions = temp_selections
                 st.session_state["custom_geo_data_editor"] = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
                 st.rerun()
-
         if spend_mode == 'Custom':
             st.markdown("---")
             st.write("Edit weights and CPMs below. Your edits will be saved automatically.")
             if "custom_geo_data_editor" not in st.session_state:
-                st.session_state["custom_geo_data_editor"] = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
+                st.session_state["custom_geo_data_editor"] = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.get('selected_regions', ALL_REGIONS))].copy()
             edited_df = st.data_editor(st.session_state["custom_geo_data_editor"], num_rows="dynamic", use_container_width=True, key="custom_geo_data_editor")
             current_sum = edited_df['Weight'].sum()
             st.metric(label="Current Weight Sum", value=f"{current_sum:.2%}", delta=f"{(current_sum - 1.0):.2%} from target")
             if not np.isclose(current_sum, 1.0): st.warning("Sum of weights must be 100%.")
 
 st.markdown("---")
+submit = st.sidebar.button("Run Calculation", type="primary", use_container_width=True)
 
 if submit:
     st.header("Results")
@@ -213,15 +195,15 @@ if submit:
     total_users = req_n * num_groups if req_n else 0
     
     if calculate_geo_spend and req_n:
-        if st.session_state.selected_regions:
+        if st.session_state.get('selected_regions', ALL_REGIONS):
             geo_df = pd.DataFrame()
             if spend_mode == "Custom":
                 geo_df = pd.DataFrame(st.session_state.get("custom_geo_data_editor", []))
-                if geo_df.empty: geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
+                if geo_df.empty: geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.get('selected_regions', ALL_REGIONS))].copy()
                 if not np.isclose(geo_df['Weight'].sum(), 1.0):
                     st.error("Final check failed: Custom weights must sum to 1.0."); geo_df = pd.DataFrame()
             else:
-                base_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
+                base_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.get('selected_regions', ALL_REGIONS))].copy()
                 if not base_df.empty:
                     if spend_mode == "Population-based": base_df["Weight"] /= base_df["Weight"].sum()
                     else: base_df["Weight"] = 1 / len(base_df)
@@ -233,7 +215,7 @@ if submit:
                 geo_df["Spend (£)"] = geo_df["Impressions (k)"] * geo_df["CPM (£)"]
                 total_spend = geo_df['Spend (£)'].sum()
 
-    if 'weekly_traffic' in locals() and weekly_traffic > 0 and req_n:
+    if weekly_traffic > 0 and req_n:
         weeks = total_users / weekly_traffic
 
     if req_n:
