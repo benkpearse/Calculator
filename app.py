@@ -180,9 +180,13 @@ if st.session_state.submit:
     else: 
         req_n = fixed_n
     
-    total_users = req_n * num_groups if req_n else 0
+    if req_n is None:
+        st.error("Could not determine sample size. The uplift may be too high (making the variant rate > 100%), or the required sample size exceeds the 5 million limit.")
+        st.stop()
+
+    total_users = req_n * num_groups
     
-    if calculate_geo_spend and req_n:
+    if calculate_geo_spend:
         selected_regions = st.session_state.get('selected_regions', ALL_REGIONS)
         if selected_regions:
             geo_df = pd.DataFrame()
@@ -203,26 +207,23 @@ if st.session_state.submit:
                 geo_df["Spend (£)"] = geo_df["Impressions (k)"] * geo_df["CPM (£)"]
                 total_spend = geo_df['Spend (£)'].sum()
 
-    if weekly_traffic > 0 and req_n:
+    if weekly_traffic > 0:
         weeks = total_users / weekly_traffic
 
-    if req_n:
-        st.markdown('<div class="bordered-container">', unsafe_allow_html=True)
-        st.subheader("Executive Summary")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Test Groups", f"{num_groups} (1C + {num_variants}V)")
-        col2.metric("Sample Size (per Group)", f"{req_n:,}")
-        col3.metric("Total Users Required", f"{total_users:,}")
-        if total_spend is not None: col4.metric("Total Estimated Ad Spend", f"£{total_spend:,.0f}")
-        else: col4.metric("Total Estimated Ad Spend", "N/A", help="Enable Geo Spend to calculate.")
-        st.markdown("---")
-        summary_text = f"For a test with **{num_groups} groups**, you will need **{req_n:,} users per group**, for a total of **{total_users:,} users**."
-        if total_spend is not None: summary_text += f" This corresponds to an estimated ad spend of **£{total_spend:,.0f}**."
-        if weeks is not None: summary_text += f" At the specified traffic rate, the test will take approximately **{weeks:.1f} weeks**."
-        st.info(summary_text)
-        st.markdown('</div>', unsafe_allow_html=True)
-    else:
-        st.error("Could not determine the required sample size with the provided inputs.")
+    st.markdown('<div class="bordered-container">', unsafe_allow_html=True)
+    st.subheader("Executive Summary")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Test Groups", f"{num_groups} (1C + {num_variants}V)")
+    col2.metric("Sample Size (per Group)", f"{req_n:,}")
+    col3.metric("Total Users Required", f"{total_users:,}")
+    if total_spend is not None: col4.metric("Total Estimated Ad Spend", f"£{total_spend:,.0f}")
+    else: col4.metric("Total Estimated Ad Spend", "N/A", help="Enable Geo Spend to calculate.")
+    st.markdown("---")
+    summary_text = f"For a test with **{num_groups} groups**, you will need **{req_n:,} users per group**, for a total of **{total_users:,} users**."
+    if total_spend is not None: summary_text += f" This corresponds to an estimated ad spend of **£{total_spend:,.0f}**."
+    if weeks is not None: summary_text += f" At the specified traffic rate, the test will take approximately **{weeks:.1f} weeks**."
+    st.info(summary_text)
+    st.markdown('</div>', unsafe_allow_html=True)
 
     if mode == "Estimate MDE":
         st.subheader("📉 Minimum Detectable Effect")
@@ -242,7 +243,7 @@ if st.session_state.submit:
             fig, ax = plt.subplots(); ax.barh(geo_df["Region"], geo_df["Spend (£)"])
             ax.set_xlabel("Spend (£)"); ax.set_title("Geo Spend Breakdown"); plt.tight_layout(); st.pyplot(fig)
 
-    if mode == "Estimate Sample Size" and req_n:
+    if mode == "Estimate Sample Size":
         with st.expander("View Sample Size vs. Uplift Sensitivity"):
             uplifts_plot = np.linspace(uplift * 0.5, uplift * 2.0, 50)
             sizes = [calculate_sample_size_frequentist(p_A, u, desired_power, alpha, num_variants) for u in uplifts_plot if u > 0 and p_A*(1+u) <= 1]
