@@ -13,47 +13,31 @@ st.set_page_config(
 
 # --- Core Calculation Functions ---
 
-# --- Bayesian Functions ---
 @st.cache_data
 def run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, thresh):
-    """
-    Runs a single set of simulations for a given sample size and conversion rates.
-    Returns the calculated power.
-    """
     n_A = n
     n_B = n
-    
     rng = np.random.default_rng(seed=42)
     conversions_A = rng.binomial(n_A, p_A, size=simulations)
     conversions_B = rng.binomial(n_B, p_B, size=simulations)
-
     alpha_post_A = alpha_prior + conversions_A
     beta_post_A = beta_prior + n_A - conversions_A
     alpha_post_B = alpha_prior + conversions_B
     beta_post_B = beta_prior + n_B - conversions_B
-
     post_samples_A = beta.rvs(alpha_post_A, beta_post_A, size=(samples, simulations), random_state=rng)
     post_samples_B = beta.rvs(alpha_post_B, beta_post_B, size=(samples, simulations), random_state=rng)
-
     prob_B_better = np.mean(post_samples_B > post_samples_A, axis=0)
     power = np.mean(prob_B_better > thresh)
     return power
 
 @st.cache_data
 def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior):
-    """
-    Simulates Bayesian power across a range of sample sizes.
-    """
     p_B = p_A * (1 + uplift)
-    if p_B > 1.0:
-        st.error(f"Error: Uplift of {uplift:.2%} on baseline {p_A:.2%} results in a conversion rate > 100%.")
-        return []
-
+    if p_B > 1.0: return []
     results = []
     n = 100
     power = 0
     MAX_SAMPLE_SIZE = 5_000_000
-
     with st.spinner("Searching for required sample size..."):
         while power < desired_power and n < MAX_SAMPLE_SIZE:
             power = run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, thresh)
@@ -66,12 +50,8 @@ def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alp
 
 @st.cache_data
 def simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n):
-    """
-    Simulates Bayesian MDE for a fixed sample size.
-    """
     results = []
     uplifts = np.linspace(0.01, 0.50, 20)
-
     with st.spinner("Running simulations for MDE..."):
         for uplift in uplifts:
             p_B = p_A * (1 + uplift)
@@ -81,16 +61,10 @@ def simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, 
             if power >= desired_power: break
     return results
 
-# --- Frequentist Function ---
 @st.cache_data
 def calculate_sample_size_frequentist(p_A, uplift, power=0.8, alpha=0.05):
-    """
-    Calculates sample size using a two-sided Z-test formula.
-    """
     p_B = p_A * (1 + uplift)
-    if p_B > 1.0:
-        return None
-        
+    if p_B > 1.0: return None
     z_alpha = norm.ppf(1 - alpha / 2)
     z_beta = norm.ppf(power)
     p_pooled = (p_A + p_B) / 2
@@ -100,13 +74,117 @@ def calculate_sample_size_frequentist(p_A, uplift, power=0.8, alpha=0.05):
     return int(np.ceil(sample_size_per_group))
 
 # --- Geo Testing Data ---
-UK_REGIONS = [
-    "North East", "North West", "Yorkshire and the Humber", "East Midlands",
-    "West Midlands", "East of England", "London", "South East",
-    "South West", "Wales", "Scotland", "Northern Ireland"
-]
+UK_REGIONS = ["North East", "North West", "Yorkshire and the Humber", "East Midlands", "West Midlands", "East of England", "London", "South East", "South West", "Wales", "Scotland", "Northern Ireland"]
 DEFAULT_CPMS = [7.50, 8.00, 8.25, 7.00, 7.80, 8.10, 12.00, 10.00, 7.60, 6.90, 9.00, 8.50]
 DEFAULT_WEIGHTS = [0.03, 0.09, 0.07, 0.07, 0.09, 0.10, 0.18, 0.16, 0.07, 0.04, 0.07, 0.03]
+
+# --- Refactored Display Functions ---
+def display_bayesian_results(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, mode, fixed_n, weekly_traffic):
+    if mode == "Estimate Sample Size":
+        results = simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior)
+        if results:
+            x_vals, y_vals = zip(*results)
+            required_sample_size = x_vals[-1] if y_vals[-1] >= desired_power else None
+            st.subheader("📈 Bayesian Sample Size Estimation")
+            if required_sample_size:
+                st.success(f"✅ Estimated minimum sample size per group: **{required_sample_size:,}** (achieved {y_vals[-1]:.1%} power).")
+            else:
+                st.warning("Could not reach desired power. The uplift may be too small or the power target too high for a practical test.")
+            
+            fig, ax = plt.subplots(figsize=(8, 4))
+            ax.plot(x_vals, y_vals, marker='o', label='Estimated Power')
+            ax.axhline(desired_power, color='red', linestyle='--', label='Target Power')
+            ax.set_xlabel("Sample Size per Group")
+            ax.set_xscale('log')
+            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"{int(x):,}"))
+            ax.set_ylabel("Estimated Power")
+            ax.set_title("Power vs. Sample Size")
+            ax.grid(True, which="both", ls="--")
+            ax.legend()
+            st.pyplot(fig)
+    else: # MDE Mode
+        results = simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n)
+        if results:
+            x_vals, y_vals = zip(*results)
+            required_sample_size = fixed_n # For duration calculation
+            st.subheader("📉 Bayesian MDE Estimation")
+            if y_vals[-1] >= desired_power:
+                st.success(f"✅ With {fixed_n:,} users per group, the minimum detectable uplift is **{x_vals[-1]:.2%}** (achieved {y_vals[-1]:.1%} power).")
+            else:
+                st.warning("Could not reach desired power with the given sample size.")
+            
+            fig, ax = plt.subplots(figsize=(8, 4))
+            ax.plot([x * 100 for x in x_vals], y_vals, marker='o', label='Estimated Power')
+            ax.axhline(desired_power, color='red', linestyle='--', label='Target Power')
+            ax.set_xlabel("Minimum Detectable Uplift (%)")
+            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"{x:.1f}"))
+            ax.set_ylabel("Estimated Power")
+            ax.set_title("Power vs. MDE")
+            ax.grid(True)
+            ax.legend()
+            st.pyplot(fig)
+
+    if 'required_sample_size' in locals() and required_sample_size:
+        display_duration_estimate(required_sample_size, weekly_traffic)
+
+def display_frequentist_results(p_A, uplift, power, alpha, weekly_traffic, calculate_geo_spend):
+    required_sample_size = calculate_sample_size_frequentist(p_A, uplift, power=power, alpha=alpha)
+    st.subheader("📈 Frequentist Sample Size Estimation")
+    if required_sample_size:
+        st.success(f"✅ You need at least **{required_sample_size:,} users per variant** to detect a {uplift:.2%} uplift with {power:.0%} power and {1-alpha:.0%} confidence.")
+        
+        if calculate_geo_spend:
+            display_geo_spend(required_sample_size)
+
+        st.subheader("🔬 Sample Size vs. Uplift")
+        uplifts_range = np.linspace(uplift * 0.2, uplift * 2, 50)
+        sample_sizes_range = [calculate_sample_size_frequentist(p_A, u, power=power, alpha=alpha) for u in uplifts_range if u > 0 and p_A * (1+u) <= 1]
+        valid_uplifts = [u for u in uplifts_range if u > 0 and p_A * (1+u) <= 1]
+
+        fig2, ax2 = plt.subplots(figsize=(8, 4))
+        ax2.plot([u * 100 for u in valid_uplifts], sample_sizes_range, color='blue')
+        ax2.axvline(x=uplift * 100, linestyle='--', color='red', label=f'Your Target ({uplift:.1%})')
+        ax2.set_xlabel("Minimum Detectable Uplift (%)")
+        ax2.set_ylabel("Required Sample Size per Group")
+        ax2.set_title("Sample Size vs. Uplift")
+        ax2.grid(True)
+        ax2.legend()
+        st.pyplot(fig2)
+        
+        display_duration_estimate(required_sample_size, weekly_traffic)
+
+def display_duration_estimate(required_sample_size, weekly_traffic):
+    st.subheader("🗓️ Estimated Test Duration")
+    users_per_week_per_variant = weekly_traffic / 2
+    if users_per_week_per_variant > 0:
+        estimated_weeks = required_sample_size / users_per_week_per_variant
+        st.info(f"With {weekly_traffic:,} total users per week, you'll need approximately **{estimated_weeks:.1f} weeks** to reach the required sample size.")
+
+def display_geo_spend(required_sample_size):
+    total_users_needed = required_sample_size * 2
+    st.subheader("💰 Estimated Ad Spend for Geo Test")
+    
+    geo_df = st.session_state.get('geo_spend_df', pd.DataFrame())
+    if not geo_df.empty and np.isclose(geo_df["Weight"].sum(), 1.0):
+        region_costs = []
+        for _, row in geo_df.iterrows():
+            region_users = total_users_needed * row["Weight"]
+            region_impressions_in_thousands = region_users / 1000
+            region_cost = region_impressions_in_thousands * row["CPM (£)"]
+            region_costs.append(region_cost)
+        
+        geo_df["Estimated Spend (£)"] = region_costs
+        total_spend = geo_df["Estimated Spend (£)"].sum()
+        st.metric("Total Estimated Ad Spend", f"£{total_spend:,.2f}")
+
+        st.subheader("📊 Regional Spend Breakdown")
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.barh(geo_df["Region"], geo_df["Estimated Spend (£)"])
+        ax.set_xlabel("Spend (£)")
+        ax.set_title("Estimated Ad Spend by UK Region")
+        st.pyplot(fig)
+    elif not geo_df.empty:
+        st.error("❌ Region weights in the sidebar must sum to 1 to calculate spend.")
 
 
 # 2. Page Title and Introduction
@@ -136,8 +214,13 @@ with st.sidebar:
         format="%.4f", help="Relative improvement expected in the variant (e.g., 0.10 for +10%)."
     )
 
+    # --- Conditional Inputs based on Methodology ---
     if methodology == "Bayesian":
         st.subheader("Bayesian Settings")
+        mode = st.radio("Planning Mode", ["Estimate Sample Size", "Estimate MDE"], horizontal=True)
+        if mode == "Estimate MDE":
+            fixed_n = st.number_input("Fixed sample size per variant", 100, value=10000, step=100)
+        
         thresh = st.slider("Posterior threshold", 0.80, 0.99, 0.95, step=0.01, help="The P(B > A) threshold required to declare a winner. 95% is common.")
         desired_power = st.slider("Desired power", 0.5, 0.99, 0.8, step=0.01, help="The probability of detecting the uplift if it's real. 80% is common.")
         simulations = st.slider("Simulations", 100, 5000, 500, step=100)
@@ -166,12 +249,10 @@ with st.sidebar:
         help="Total users entering the experiment each week (before the 50/50 split)."
     )
 
-    # --- NEW: Optional Geo Ad Spend Section in Sidebar ---
     st.header("4. Geo Ad Spend (Optional)")
     calculate_geo_spend = st.checkbox("Calculate estimated ad spend for a Geo Test")
     if calculate_geo_spend and methodology == 'Frequentist':
         selected_regions = st.multiselect("Select regions:", UK_REGIONS, default=UK_REGIONS)
-        
         if 'geo_spend_df' not in st.session_state or set(st.session_state.geo_spend_df['Region']) != set(selected_regions):
             if selected_regions:
                 filtered_indices = [UK_REGIONS.index(r) for r in selected_regions]
@@ -179,22 +260,13 @@ with st.sidebar:
                 filtered_weights = [DEFAULT_WEIGHTS[i] for i in filtered_indices]
                 weight_sum = sum(filtered_weights)
                 normalized_weights = [w / weight_sum for w in filtered_weights]
-                st.session_state.geo_spend_df = pd.DataFrame({
-                    "Region": selected_regions,
-                    "Weight": normalized_weights,
-                    "CPM (£)": filtered_cpms
-                })
+                st.session_state.geo_spend_df = pd.DataFrame({"Region": selected_regions, "Weight": normalized_weights, "CPM (£)": filtered_cpms})
         
         if 'geo_spend_df' in st.session_state and selected_regions:
             st.caption("Edit regional weights and CPMs as needed:")
-            edited_df = st.data_editor(
-                st.session_state.geo_spend_df, key='geo_spend_df_editor',
-                column_config={
-                    "Weight": st.column_config.ProgressColumn("Weight", format="%.3f", min_value=0, max_value=1),
-                    "CPM (£)": st.column_config.NumberColumn(format="£%.2f", min_value=0.0, step=0.1)
-                }
-            )
-            st.session_state.geo_spend_df = edited_df # Persist edits
+            edited_df = st.data_editor(st.session_state.geo_spend_df, key='geo_spend_df_editor',
+                column_config={"Weight": st.column_config.ProgressColumn("Weight", format="%.3f", min_value=0, max_value=1), "CPM (£)": st.column_config.NumberColumn(format="£%.2f", min_value=0.0, step=0.1)})
+            st.session_state.geo_spend_df = edited_df
 
     st.markdown("---")
     run_button = st.button("Run Calculation", type="primary", use_container_width=True)
@@ -204,65 +276,11 @@ st.markdown("---")
 
 if run_button:
     if methodology == "Bayesian":
-        # ... (Bayesian output logic remains the same) ...
-        st.info("Geo Spend calculation is only available for the Frequentist methodology.")
-    
+        # Pass the correct 'fixed_n' value if in MDE mode
+        mde_fixed_n = fixed_n if mode == 'Estimate MDE' else None
+        display_bayesian_results(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, mode, mde_fixed_n, weekly_traffic)
     else: # Frequentist
-        required_sample_size = calculate_sample_size_frequentist(p_A, uplift, power=power, alpha=alpha)
-        st.subheader("📈 Frequentist Sample Size Estimation")
-        if required_sample_size:
-            st.success(f"✅ You need at least **{required_sample_size:,} users per variant** to detect a {uplift:.2%} uplift with {power:.0%} power and {1-alpha:.0%} confidence.")
-            
-            # --- GEO AD SPEND CALCULATION AND DISPLAY ---
-            if calculate_geo_spend:
-                total_users_needed = required_sample_size * 2
-                st.subheader("💰 Estimated Ad Spend for Geo Test")
-                
-                geo_df = st.session_state.get('geo_spend_df', pd.DataFrame())
-                if not geo_df.empty and np.isclose(geo_df["Weight"].sum(), 1.0):
-                    region_costs = []
-                    for _, row in geo_df.iterrows():
-                        region_users = total_users_needed * row["Weight"]
-                        region_impressions_in_thousands = region_users / 1000
-                        region_cost = region_impressions_in_thousands * row["CPM (£)"]
-                        region_costs.append(region_cost)
-                    
-                    geo_df["Estimated Spend (£)"] = region_costs
-                    total_spend = geo_df["Estimated Spend (£)"].sum()
-                    st.metric("Total Estimated Ad Spend", f"£{total_spend:,.2f}")
-
-                    st.subheader("📊 Regional Spend Breakdown")
-                    fig, ax = plt.subplots(figsize=(10, 5))
-                    ax.barh(geo_df["Region"], geo_df["Estimated Spend (£)"])
-                    ax.set_xlabel("Spend (£)")
-                    ax.set_title("Estimated Ad Spend by UK Region")
-                    st.pyplot(fig)
-                elif not geo_df.empty:
-                    st.error("❌ Region weights in the sidebar must sum to 1 to calculate spend.")
-
-            # --- Sample Size vs Uplift Visualization ---
-            st.subheader("🔬 Sample Size vs. Uplift")
-            uplifts_range = np.linspace(uplift * 0.2, uplift * 2, 50)
-            sample_sizes_range = [calculate_sample_size_frequentist(p_A, u, power=power, alpha=alpha) for u in uplifts_range if u > 0]
-            valid_uplifts = [u for u in uplifts_range if u > 0]
-
-            fig2, ax2 = plt.subplots(figsize=(8, 4))
-            ax2.plot([u * 100 for u in valid_uplifts], sample_sizes_range, color='blue')
-            ax2.axvline(x=uplift * 100, linestyle='--', color='red', label=f'Your Target ({uplift:.1%})')
-            ax2.set_xlabel("Minimum Detectable Uplift (%)")
-            ax2.set_ylabel("Required Sample Size per Group")
-            ax2.set_title("Sample Size vs. Uplift")
-            ax2.grid(True)
-            ax2.legend()
-            st.pyplot(fig2)
-
-    # --- Time-Based Planning (works for both) ---
-    if 'required_sample_size' in locals() and required_sample_size:
-        st.subheader("🗓️ Estimated Test Duration")
-        users_per_week_per_variant = weekly_traffic / 2
-        if users_per_week_per_variant > 0:
-            estimated_weeks = required_sample_size / users_per_week_per_variant
-            st.info(f"With {weekly_traffic:,} total users per week, you'll need approximately **{estimated_weeks:.1f} weeks** to reach the required sample size.")
+        display_frequentist_results(p_A, uplift, power, alpha, weekly_traffic, calculate_geo_spend)
 else:
     st.info("Adjust the parameters in the sidebar and click 'Run Calculation' to see the results.")
 
@@ -290,4 +308,3 @@ with st.expander("ℹ️ About the Methodologies"):
     - **Editable CPMs:** You can edit the default Cost Per Mille (CPM) values in the sidebar to match your media plan.
     - **The Output:** The final table and chart show the estimated ad spend required in each region to acquire the necessary users for a properly powered test.
     """)
-
