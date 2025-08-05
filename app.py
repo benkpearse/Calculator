@@ -95,8 +95,7 @@ ALL_REGIONS = GEO_DEFAULTS["Region"].tolist()
 # --- Initialize Session State ---
 if 'selected_regions' not in st.session_state:
     st.session_state.selected_regions = ALL_REGIONS
-if 'geo_df_custom' not in st.session_state:
-    st.session_state.geo_df_custom = GEO_DEFAULTS.copy()
+# FIX: The 'geo_df_custom' state is no longer needed, we build the editor from defaults.
 
 # --- UI ---
 st.title("⚙️ Pre-Test Power Calculator")
@@ -132,7 +131,6 @@ with st.sidebar.form("params_form"):
         st.subheader("Frequentist Settings")
         alpha, desired_power = st.slider("Significance α", 0.01, 0.10, 0.05, help="Tolerance for a false positive."), st.slider("Desired Power (1-β)", 0.5, 0.99, 0.8, help="Chance of detecting the uplift if it's real.")
     
-    # FIX: Optional calculations moved to their own section
     st.header("2. Optional Calculations")
     estimate_duration = st.checkbox("Estimate Test Duration", value=True)
     if estimate_duration:
@@ -161,15 +159,27 @@ if calculate_geo_spend:
             if submitted:
                 st.session_state.selected_regions = temp_selections
                 st.rerun()
+
+        # FIX: The custom editor logic is now simpler and more robust
         if spend_mode == 'Custom':
             st.markdown("---")
-            editor_display_df = st.session_state.geo_df_custom[st.session_state.geo_df_custom['Region'].isin(st.session_state.selected_regions)].copy()
-            if not editor_display_df.empty:
-                edited_df = st.data_editor(editor_display_df, num_rows="dynamic", use_container_width=True, key="custom_geo_editor")
+            # Build the editor's dataframe from the master defaults, filtered by the current selection
+            df_for_editor = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
+            
+            if not df_for_editor.empty:
+                # The key of the data_editor preserves its own state across reruns
+                edited_df = st.data_editor(
+                    df_for_editor, 
+                    num_rows="dynamic", 
+                    use_container_width=True, 
+                    key="custom_geo_data_editor"
+                )
+                
+                # We check the state of the editor widget itself for the sum
                 current_sum = edited_df['Weight'].sum()
                 st.metric(label="Current Weight Sum", value=f"{current_sum:.2%}", delta=f"{(current_sum - 1.0):.2%} from target")
-                if not np.isclose(current_sum, 1.0): st.warning("Sum of weights must be 100%.")
-                st.session_state.geo_df_custom.update(edited_df)
+                if not np.isclose(current_sum, 1.0):
+                    st.warning("Sum of weights must be 100%.")
             else:
                 st.warning("Please select at least one region and click 'Confirm' to configure custom weights.")
 
@@ -190,8 +200,13 @@ if submit:
         if st.session_state.selected_regions:
             geo_df = pd.DataFrame()
             if spend_mode == "Custom":
-                geo_df = st.session_state.geo_df_custom[st.session_state.geo_df_custom['Region'].isin(st.session_state.selected_regions)].copy()
-                if not np.isclose(geo_df['Weight'].sum(), 1.0): geo_df = pd.DataFrame()
+                # FIX: Read the data directly from the state of the editor widget
+                if "custom_geo_data_editor" in st.session_state:
+                    geo_df = st.session_state["custom_geo_data_editor"]
+                    if not np.isclose(geo_df['Weight'].sum(), 1.0):
+                        st.error("Final check failed: Custom weights must sum to 1.0."); geo_df = pd.DataFrame()
+                else: # Editor hasn't been rendered yet, use defaults
+                    geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
             else:
                 base_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
                 if not base_df.empty:
@@ -215,7 +230,6 @@ if submit:
             col2.metric("Total Users Required", f"{(req_n * 2):,}")
             if total_spend is not None: col3.metric("Total Estimated Ad Spend", f"£{total_spend:,.0f}")
             else: col3.metric("Total Estimated Ad Spend", "N/A")
-            
             st.markdown("---")
             summary_text = f"To confidently detect the specified effect, this test requires **{req_n*2:,} total users**."
             if total_spend is not None: summary_text += f" This corresponds to an estimated ad spend of **£{total_spend:,.0f}**."
