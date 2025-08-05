@@ -95,7 +95,8 @@ ALL_REGIONS = GEO_DEFAULTS["Region"].tolist()
 # --- Initialize Session State ---
 if 'selected_regions' not in st.session_state:
     st.session_state.selected_regions = ALL_REGIONS
-# FIX: The 'geo_df_custom' state is no longer needed, we build the editor from defaults.
+if 'geo_df_custom' not in st.session_state:
+    st.session_state.geo_df_custom = GEO_DEFAULTS.copy()
 
 # --- UI ---
 st.title("⚙️ Pre-Test Power Calculator")
@@ -155,27 +156,41 @@ if calculate_geo_spend:
                 with cols[i % 3]:
                     if st.checkbox(region, value=(region in st.session_state.selected_regions), key=f"check_{region}"):
                         temp_selections.append(region)
+            
             submitted = st.form_submit_button("Confirm Region Selection")
             if submitted:
                 st.session_state.selected_regions = temp_selections
+                
+                # --- FIX: ROBUST STATE SYNCHRONIZATION ---
+                # Get the regions currently in our custom dataframe
+                current_custom_regions = st.session_state.geo_df_custom['Region'].tolist()
+                
+                # Add any newly selected regions that are missing
+                for region in st.session_state.selected_regions:
+                    if region not in current_custom_regions:
+                        new_row = GEO_DEFAULTS[GEO_DEFAULTS['Region'] == region]
+                        st.session_state.geo_df_custom = pd.concat([st.session_state.geo_df_custom, new_row], ignore_index=True)
+                
                 st.rerun()
 
-        # FIX: The custom editor logic is now simpler and more robust
         if spend_mode == 'Custom':
             st.markdown("---")
-            # Build the editor's dataframe from the master defaults, filtered by the current selection
-            df_for_editor = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
+            # The editor always works on a filtered view of the master custom dataframe
+            editor_display_df = st.session_state.geo_df_custom[st.session_state.geo_df_custom['Region'].isin(st.session_state.selected_regions)].copy()
             
-            if not df_for_editor.empty:
-                # The key of the data_editor preserves its own state across reruns
+            if not editor_display_df.empty:
+                # When edits are made, they are returned here
                 edited_df = st.data_editor(
-                    df_for_editor, 
+                    editor_display_df, 
                     num_rows="dynamic", 
                     use_container_width=True, 
-                    key="custom_geo_data_editor"
+                    key="custom_geo_editor"
                 )
                 
-                # We check the state of the editor widget itself for the sum
+                # Update the master dataframe with the changes from the editor view
+                st.session_state.geo_df_custom.update(edited_df)
+                
+                # Display metrics based on the latest edits
                 current_sum = edited_df['Weight'].sum()
                 st.metric(label="Current Weight Sum", value=f"{current_sum:.2%}", delta=f"{(current_sum - 1.0):.2%} from target")
                 if not np.isclose(current_sum, 1.0):
@@ -200,19 +215,17 @@ if submit:
         if st.session_state.selected_regions:
             geo_df = pd.DataFrame()
             if spend_mode == "Custom":
-                # FIX: Read the data directly from the state of the editor widget
-                if "custom_geo_data_editor" in st.session_state:
-                    geo_df = st.session_state["custom_geo_data_editor"]
-                    if not np.isclose(geo_df['Weight'].sum(), 1.0):
-                        st.error("Final check failed: Custom weights must sum to 1.0."); geo_df = pd.DataFrame()
-                else: # Editor hasn't been rendered yet, use defaults
-                    geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
+                # For custom mode, the source of truth is our master custom dataframe
+                geo_df = st.session_state.geo_df_custom[st.session_state.geo_df_custom['Region'].isin(st.session_state.selected_regions)].copy()
+                if not np.isclose(geo_df['Weight'].sum(), 1.0):
+                    st.error("Final check failed: Custom weights must sum to 1.0."); geo_df = pd.DataFrame()
             else:
                 base_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
                 if not base_df.empty:
                     if spend_mode == "Population-based": base_df["Weight"] /= base_df["Weight"].sum()
                     else: base_df["Weight"] = 1 / len(base_df)
                 geo_df = base_df
+            
             if not geo_df.empty:
                 geo_df["Users"] = (geo_df["Weight"] * (req_n * 2)).astype(int)
                 geo_df["Impressions (k)"] = geo_df["Users"] / 1000
@@ -230,6 +243,7 @@ if submit:
             col2.metric("Total Users Required", f"{(req_n * 2):,}")
             if total_spend is not None: col3.metric("Total Estimated Ad Spend", f"£{total_spend:,.0f}")
             else: col3.metric("Total Estimated Ad Spend", "N/A")
+            
             st.markdown("---")
             summary_text = f"To confidently detect the specified effect, this test requires **{req_n*2:,} total users**."
             if total_spend is not None: summary_text += f" This corresponds to an estimated ad spend of **£{total_spend:,.0f}**."
