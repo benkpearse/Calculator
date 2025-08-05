@@ -132,9 +132,17 @@ with st.sidebar.form("params_form"):
         st.subheader("Frequentist Settings")
         alpha, desired_power = st.slider("Significance α", 0.01, 0.10, 0.05, help="Tolerance for a false positive."), st.slider("Desired Power (1-β)", 0.5, 0.99, 0.8, help="Chance of detecting the uplift if it's real.")
     
+    # FIX: Optional calculations moved to their own section
+    st.header("2. Optional Calculations")
+    estimate_duration = st.checkbox("Estimate Test Duration", value=True)
+    if estimate_duration:
+        weekly_traffic = st.number_input("Weekly traffic", min_value=1, value=20000, help="Total users entering the experiment each week (before 50/50 split).")
+    else:
+        weekly_traffic = 0
+
     submit = st.form_submit_button("Run Calculation", type="primary")
 
-st.sidebar.header("2. Geo Spend Configuration")
+st.sidebar.header("Geo Spend Configuration")
 calculate_geo_spend = st.sidebar.checkbox("Calculate Geo Spend", value=True, help="Enable to plan ad spend for a geo-based test.")
 if calculate_geo_spend:
     spend_mode = st.sidebar.radio("Weighting Mode", ["Population-based", "Equal", "Custom"], index=0, horizontal=True, help="How to distribute sample size across active regions.")
@@ -171,16 +179,13 @@ if submit:
     st.header("Results")
     req_n, total_spend, weeks = None, None, None
     
-    # --- 1. Core Calculation ---
     if mode == "Estimate Sample Size":
         if methodology == "Frequentist": req_n = calculate_sample_size_frequentist(p_A, uplift, desired_power, alpha)
         else:
             b_results = simulate_power(p_A, uplift, thresh, desired_power, sims, samples, 1, 1)
             if b_results and b_results[-1][1] >= desired_power: req_n = b_results[-1][0]
-    else: # MDE Mode
-        req_n = fixed_n
+    else: req_n = fixed_n
     
-    # --- 2. Geo Spend Calculation (if applicable) ---
     if calculate_geo_spend and req_n:
         if st.session_state.selected_regions:
             geo_df = pd.DataFrame()
@@ -193,38 +198,32 @@ if submit:
                     if spend_mode == "Population-based": base_df["Weight"] /= base_df["Weight"].sum()
                     else: base_df["Weight"] = 1 / len(base_df)
                 geo_df = base_df
-            
             if not geo_df.empty:
                 geo_df["Users"] = (geo_df["Weight"] * (req_n * 2)).astype(int)
                 geo_df["Impressions (k)"] = geo_df["Users"] / 1000
                 geo_df["Spend (£)"] = geo_df["Impressions (k)"] * geo_df["CPM (£)"]
                 total_spend = geo_df['Spend (£)'].sum()
 
-    # --- 3. Display Executive Summary ---
+    if weekly_traffic and weekly_traffic > 0 and req_n:
+        weeks = (req_n * 2) / weekly_traffic
+
     if req_n:
         with st.container(border=True):
             st.subheader("Executive Summary")
-            
-            # Key Metrics
             col1, col2, col3 = st.columns(3)
             col1.metric("Sample Size (per Variant)", f"{req_n:,}")
             col2.metric("Total Users Required", f"{(req_n * 2):,}")
-            if total_spend is not None:
-                col3.metric("Total Estimated Ad Spend", f"£{total_spend:,.0f}")
-            else:
-                col3.metric("Total Estimated Ad Spend", "N/A")
-
-            # Narrative Summary
+            if total_spend is not None: col3.metric("Total Estimated Ad Spend", f"£{total_spend:,.0f}")
+            else: col3.metric("Total Estimated Ad Spend", "N/A")
+            
             st.markdown("---")
             summary_text = f"To confidently detect the specified effect, this test requires **{req_n*2:,} total users**."
-            if total_spend is not None:
-                summary_text += f" This corresponds to an estimated ad spend of **£{total_spend:,.0f}**."
+            if total_spend is not None: summary_text += f" This corresponds to an estimated ad spend of **£{total_spend:,.0f}**."
+            if weeks is not None: summary_text += f" At the specified traffic rate, the test will take approximately **{weeks:.1f} weeks**."
             st.info(summary_text)
-
-    else: # If no calculation was possible
+    else:
         st.error("Could not determine the required sample size with the provided inputs.")
 
-    # --- 4. Display Detailed Breakdowns ---
     if mode == "Estimate MDE":
         st.subheader("📉 Minimum Detectable Effect")
         if methodology == "Frequentist": mde_results = calculate_mde_frequentist(p_A, fixed_n, desired_power, alpha)
@@ -235,14 +234,6 @@ if submit:
         else:
             st.warning("Could not reach desired power with the given sample size.")
     
-    # --- Optional Duration Calculation ---
-    if req_n:
-        st.subheader("🗓️ Estimate Test Duration (Optional)")
-        weekly_traffic = st.number_input("Enter total weekly traffic to estimate duration:", min_value=0, value=0, help="Total users entering the experiment each week (before the 50/50 split).")
-        if weekly_traffic > 0:
-            weeks = (req_n * 2) / weekly_traffic
-            st.success(f"At this rate, the test will take approximately **{weeks:.1f} weeks** to complete.")
-
     if calculate_geo_spend and total_spend is not None:
         with st.expander("View Geo Spend Breakdown"):
             st.write("**Spend Breakdown by Region**")
