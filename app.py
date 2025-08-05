@@ -29,19 +29,19 @@ def calculate_power_frequentist(p_A: float, p_B: float, n: int, alpha: float = 0
     return norm.cdf(effect_size_norm - z_alpha) + norm.cdf(-effect_size_norm - z_alpha)
 
 @st.cache_data
-def calculate_sample_size_frequentist(p_A: float, uplift: float, power_target: float = 0.8, alpha: float = 0.05, num_variants: int = 1) -> int | None:
+def calculate_sample_size_frequentist(p_A: float, uplift: float, power_target: float = 0.8, alpha: float = 0.05, num_variants: int = 1, max_sample_size: int = 5_000_000) -> int | None:
     """Calculates required sample size by iteratively searching for 'n'."""
     p_B = p_A * (1 + uplift)
     if p_B >= 1: return None
-    n, power, MAX_SAMPLE_SIZE = 100, 0, 5_000_000
+    n, power = 100, 0
     with st.spinner("Calculating sample size..."):
-        while power < power_target and n < MAX_SAMPLE_SIZE:
+        while power < power_target and n < max_sample_size:
             power = calculate_power_frequentist(p_A, p_B, n, alpha, num_comparisons=num_variants)
             if power >= power_target: return int(n)
             if n < 1000: n += 50
             elif n < 20000: n = int(n * 1.2)
             else: n = int(n * 1.1)
-    if n >= MAX_SAMPLE_SIZE: return None
+    if n >= max_sample_size: return None
     return int(n)
 
 @st.cache_data
@@ -86,9 +86,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 with st.expander("What is Power Analysis? Click here to learn more.", expanded=False):
-    # FIX: Restored the detailed explanation text
     st.markdown("""
-    Power analysis is a statistical method used **before** an A/B test to estimate the resources needed. It helps you design a test that is both effective and efficient.
+        Power analysis is a statistical method used **before** an A/B test to estimate the resources needed. It helps you design a test that is both effective and efficient.
     - **Why is it important?** Without proper planning, you might run a test that is too short to detect a real improvement (a "false negative"), or a test that is unnecessarily long, wasting time and resources.
     #### Key Concepts
     - **Sample Size:** The number of users or sessions required in each group (e.g., 'Control' and 'Variant').
@@ -98,7 +97,7 @@ with st.expander("What is Power Analysis? Click here to learn more.", expanded=F
     1.  **Set Inputs:** Use the sidebar to enter your test parameters.
     2.  **Configure Geo-Test (Optional):** Use the main panel to select active regions and set custom weights or costs.
     3.  **Calculate:** Click "Run Calculation" to see the summary of required resources.
-    """)
+    """) # Content unchanged
 
 st.sidebar.button("Reset All Settings", on_click=reset_app_state, use_container_width=True)
 st.sidebar.markdown("---")
@@ -162,7 +161,11 @@ if calculate_geo_spend:
             st.metric(label="Current Weight Sum", value=f"{current_sum:.2%}", delta=f"{(current_sum - 1.0):.2%} from target")
             if not np.isclose(current_sum, 1.0): st.warning("Sum of weights must be 100%.")
 
-st.markdown("---")
+# FIX: New Advanced Settings section
+with st.sidebar.expander("Advanced Settings"):
+    max_sample_size = st.number_input("Max Sample Size Limit", min_value=100_000, value=5_000_000, step=1_000_000, help="The maximum sample size the calculator will search up to. Increase this for tests with very small effects.")
+
+st.sidebar.markdown("---")
 submit = st.sidebar.button("Run Calculation", type="primary", use_container_width=True)
 
 if 'submit' not in st.session_state:
@@ -176,12 +179,13 @@ if st.session_state.submit:
     num_groups = 1 + num_variants
     
     if mode == "Estimate Sample Size":
-        req_n = calculate_sample_size_frequentist(p_A, uplift, desired_power, alpha, num_variants)
+        # FIX: Pass the configurable max sample size to the function
+        req_n = calculate_sample_size_frequentist(p_A, uplift, desired_power, alpha, num_variants, max_sample_size)
     else: 
         req_n = fixed_n
     
     if req_n is None:
-        st.error("Could not determine sample size. The uplift may be too high (making the variant rate > 100%), or the required sample size exceeds the 5 million limit.")
+        st.error(f"Could not determine sample size. The uplift may be too high (making the variant rate > 100%), or the required sample size exceeds the current limit of {max_sample_size:,}. You can increase this limit under 'Advanced Settings'.")
         st.stop()
 
     total_users = req_n * num_groups
@@ -246,8 +250,8 @@ if st.session_state.submit:
     if mode == "Estimate Sample Size":
         with st.expander("View Sample Size vs. Uplift Sensitivity"):
             uplifts_plot = np.linspace(uplift * 0.5, uplift * 2.0, 50)
-            sizes = [calculate_sample_size_frequentist(p_A, u, desired_power, alpha, num_variants) for u in uplifts_plot if u > 0 and p_A*(1+u) <= 1]
-            valid_uplifts = [u for u in uplifts_plot if u > 0 and p_A*(1+u) <= 1 and calculate_sample_size_frequentist(p_A, u, desired_power, alpha, num_variants) is not None]
+            sizes = [calculate_sample_size_frequentist(p_A, u, desired_power, alpha, num_variants, max_sample_size) for u in uplifts_plot if u > 0 and p_A*(1+u) <= 1]
+            valid_uplifts = [u for u in uplifts_plot if u > 0 and p_A*(1+u) <= 1 and calculate_sample_size_frequentist(p_A, u, desired_power, alpha, num_variants, max_sample_size) is not None]
             sizes = [s for s in sizes if s is not None]
             if valid_uplifts:
                 fig2, ax2 = plt.subplots()
