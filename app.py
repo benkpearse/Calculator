@@ -86,7 +86,19 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 with st.expander("What is Power Analysis? Click here to learn more.", expanded=False):
-    st.markdown("""...""") # Content unchanged
+    # FIX: Restored the detailed explanation text
+    st.markdown("""
+    Power analysis is a statistical method used **before** an A/B test to estimate the resources needed. It helps you design a test that is both effective and efficient.
+    - **Why is it important?** Without proper planning, you might run a test that is too short to detect a real improvement (a "false negative"), or a test that is unnecessarily long, wasting time and resources.
+    #### Key Concepts
+    - **Sample Size:** The number of users or sessions required in each group (e.g., 'Control' and 'Variant').
+    - **Statistical Power (or Sensitivity):** The probability of detecting a real effect, if one truly exists. A power of 80% means you have an 80% chance of detecting a genuine uplift.
+    - **Minimum Detectable Effect (MDE):** The smallest improvement you want your test to be able to detect.
+    #### How to Use This Tool
+    1.  **Set Inputs:** Use the sidebar to enter your test parameters.
+    2.  **Configure Geo-Test (Optional):** Use the main panel to select active regions and set custom weights or costs.
+    3.  **Calculate:** Click "Run Calculation" to see the summary of required resources.
+    """)
 
 st.sidebar.button("Reset All Settings", on_click=reset_app_state, use_container_width=True)
 st.sidebar.markdown("---")
@@ -114,7 +126,6 @@ else:
 st.sidebar.header("3. Geo Spend Configuration")
 calculate_geo_spend = st.sidebar.checkbox("Calculate Geo Spend", value=True, key='calculate_geo_spend', help="Enable to plan ad spend for a geo-based test.")
 
-# FIX: Combined the geo-spend logic into a single block to prevent NameError
 if calculate_geo_spend:
     spend_mode = st.sidebar.radio("Weighting Mode", ["Population-based", "Equal", "Custom"], index=0, horizontal=True, key='spend_mode', help="How to distribute sample size across active regions.")
     
