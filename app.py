@@ -86,8 +86,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 with st.expander("What is Power Analysis? Click here to learn more.", expanded=False):
-    st.markdown("""
-        Power analysis is a statistical method used **before** an A/B test to estimate the resources needed. It helps you design a test that is both effective and efficient.
+    st.markdown("""        
+    Power analysis is a statistical method used **before** an A/B test to estimate the resources needed. It helps you design a test that is both effective and efficient.
     - **Why is it important?** Without proper planning, you might run a test that is too short to detect a real improvement (a "false negative"), or a test that is unnecessarily long, wasting time and resources.
     #### Key Concepts
     - **Sample Size:** The number of users or sessions required in each group (e.g., 'Control' and 'Variant').
@@ -97,7 +97,7 @@ with st.expander("What is Power Analysis? Click here to learn more.", expanded=F
     1.  **Set Inputs:** Use the sidebar to enter your test parameters.
     2.  **Configure Geo-Test (Optional):** Use the main panel to select active regions and set custom weights or costs.
     3.  **Calculate:** Click "Run Calculation" to see the summary of required resources.
-    """) # Content unchanged
+    """) 
 
 st.sidebar.button("Reset All Settings", on_click=reset_app_state, use_container_width=True)
 st.sidebar.markdown("---")
@@ -106,8 +106,14 @@ st.sidebar.header("1. Main Parameters")
 num_variants = st.sidebar.number_input("Number of Variants (excluding control)", min_value=1, max_value=10, value=1, key='num_variants', help="An A/B test has 1 variant. An A/B/C test has 2 variants.")
 mode = st.sidebar.radio("Planning Mode", ["Estimate Sample Size", "Estimate MDE"], horizontal=True, key='mode', help="Solve for sample size or minimum detectable effect.")
 p_A = st.sidebar.number_input("Baseline rate (p_A)", 0.0001, 0.999, 0.05, 0.001, format="%.4f", key='p_A', help="Conversion rate of the control group.")
+
+disable_run = False
 if mode == "Estimate Sample Size":
     uplift = st.sidebar.number_input("Expected uplift", 0.0001, 0.999, 0.10, 0.01, format="%.4f", key='uplift', help="Relative improvement you want to detect in the winning variant.")
+    # FIX: Proactively check for invalid inputs
+    if p_A * (1 + uplift) >= 1.0:
+        disable_run = True
+        st.sidebar.error("Variant rate (baseline * (1 + uplift)) must be less than 100%.")
 else:
     fixed_n = st.sidebar.number_input("Fixed sample size per group", 100, value=10000, step=100, key='fixed_n', help="Users available for the control and EACH variant.")
 
@@ -161,12 +167,12 @@ if calculate_geo_spend:
             st.metric(label="Current Weight Sum", value=f"{current_sum:.2%}", delta=f"{(current_sum - 1.0):.2%} from target")
             if not np.isclose(current_sum, 1.0): st.warning("Sum of weights must be 100%.")
 
-# FIX: New Advanced Settings section
 with st.sidebar.expander("Advanced Settings"):
     max_sample_size = st.number_input("Max Sample Size Limit", min_value=100_000, value=5_000_000, step=1_000_000, help="The maximum sample size the calculator will search up to. Increase this for tests with very small effects.")
 
 st.sidebar.markdown("---")
-submit = st.sidebar.button("Run Calculation", type="primary", use_container_width=True)
+# FIX: Pass the disabled flag to the button
+submit = st.sidebar.button("Run Calculation", type="primary", use_container_width=True, disabled=disable_run)
 
 if 'submit' not in st.session_state:
     st.session_state.submit = False
@@ -179,13 +185,12 @@ if st.session_state.submit:
     num_groups = 1 + num_variants
     
     if mode == "Estimate Sample Size":
-        # FIX: Pass the configurable max sample size to the function
         req_n = calculate_sample_size_frequentist(p_A, uplift, desired_power, alpha, num_variants, max_sample_size)
     else: 
         req_n = fixed_n
     
     if req_n is None:
-        st.error(f"Could not determine sample size. The uplift may be too high (making the variant rate > 100%), or the required sample size exceeds the current limit of {max_sample_size:,}. You can increase this limit under 'Advanced Settings'.")
+        st.error(f"Could not determine sample size. The required sample size may exceed the current limit of {max_sample_size:,}. You can increase this limit under 'Advanced Settings'.")
         st.stop()
 
     total_users = req_n * num_groups
