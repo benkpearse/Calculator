@@ -164,28 +164,30 @@ if calculate_geo_spend:
             submitted = st.form_submit_button("Confirm Region Selection")
             if submitted:
                 st.session_state.selected_regions = temp_selections
-                # DEFINITIVE FIX: Use one consistent key and initialize the DataFrame.
-                st.session_state.custom_geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
+                # DEFINITIVE FIX: When regions change, reset the custom editor's state to the new defaults.
+                st.session_state["custom_geo_data_editor"] = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
                 st.rerun()
-        
+
         if spend_mode == 'Custom':
             st.markdown("---")
             st.write("Edit weights and CPMs below. Your edits will be saved automatically.")
             
-            # Initialize the custom df if it doesn't exist
-            if 'custom_geo_df' not in st.session_state:
-                st.session_state.custom_geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.get('selected_regions', ALL_REGIONS))].copy()
-            
-            # The editor now directly reads from and writes to the same session state key.
+            # Initialize the editor's state if it doesn't exist
+            if "custom_geo_data_editor" not in st.session_state:
+                st.session_state["custom_geo_data_editor"] = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.get('selected_regions', ALL_REGIONS))].copy()
+
+            # The editor widget is now the single, reliable source of truth.
             edited_df = st.data_editor(
-                st.session_state.custom_geo_df, 
+                st.session_state["custom_geo_data_editor"], 
                 num_rows="dynamic", 
                 use_container_width=True, 
-                key="custom_geo_df" # This key is now the single source of truth
+                key="custom_geo_data_editor" # This key holds the output
             )
+            
             current_sum = edited_df['Weight'].sum()
             st.metric(label="Current Weight Sum", value=f"{current_sum:.2%}", delta=f"{(current_sum - 1.0):.2%} from target")
-            if not np.isclose(current_sum, 1.0): st.warning("Sum of weights must be 100%.")
+            if not np.isclose(current_sum, 1.0):
+                st.warning("Sum of weights must be 100%.")
 
 st.markdown("---")
 submit = st.sidebar.button("Run Calculation", type="primary", use_container_width=True)
@@ -209,8 +211,8 @@ if submit:
         if selected_regions:
             geo_df = pd.DataFrame()
             if spend_mode == "Custom":
-                # DEFINITIVE FIX: Read directly from the consistent session state key.
-                geo_df = st.session_state.get("custom_geo_df", pd.DataFrame()).copy()
+                geo_df = pd.DataFrame(st.session_state.get("custom_geo_data_editor", []))
+                if geo_df.empty: geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(selected_regions)].copy()
                 if not np.isclose(geo_df['Weight'].sum(), 1.0):
                     st.error("Final check failed: Custom weights must sum to 1.0."); geo_df = pd.DataFrame()
             else:
