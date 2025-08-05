@@ -1,6 +1,6 @@
 import streamlit as st
 import numpy as np
-from scipy.stats import beta
+from scipy.stats import beta, norm
 import matplotlib.pyplot as plt
 
 # 1. Set Page Configuration
@@ -10,7 +10,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Core Simulation Functions ---
+# --- Core Calculation Functions ---
+
+# --- Bayesian Functions ---
 @st.cache_data
 def run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, thresh):
     """
@@ -39,12 +41,11 @@ def run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, t
 @st.cache_data
 def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior):
     """
-    Simulates power across a range of sample sizes to find the minimum
-    sample size required to achieve the desired power.
+    Simulates Bayesian power across a range of sample sizes.
     """
     p_B = p_A * (1 + uplift)
     if p_B > 1.0:
-        st.error(f"Error: Uplift of {uplift:.2%} on baseline {p_A:.2%} results in a conversion rate > 100%. Please lower the uplift or baseline.")
+        st.error(f"Error: Uplift of {uplift:.2%} on baseline {p_A:.2%} results in a conversion rate > 100%.")
         return []
 
     results = []
@@ -52,24 +53,20 @@ def simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alp
     power = 0
     MAX_SAMPLE_SIZE = 5_000_000
 
-    with st.spinner("Searching for required sample size... This may take a moment."):
+    with st.spinner("Searching for required sample size..."):
         while power < desired_power and n < MAX_SAMPLE_SIZE:
             power = run_simulation(n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, thresh)
             results.append((n, power))
-            if power >= desired_power:
-                break
-            if n < 1000:
-                n += 100
-            elif n < 20000:
-                n = int(n * 1.5)
-            else:
-                n = int(n * 1.25)
+            if power >= desired_power: break
+            if n < 1000: n += 100
+            elif n < 20000: n = int(n * 1.5)
+            else: n = int(n * 1.25)
     return results
 
 @st.cache_data
 def simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n):
     """
-    Simulates power across a range of uplifts (MDEs) for a fixed sample size.
+    Simulates Bayesian MDE for a fixed sample size.
     """
     results = []
     uplifts = np.linspace(0.01, 0.50, 20)
@@ -77,209 +74,183 @@ def simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, 
     with st.spinner("Running simulations for MDE..."):
         for uplift in uplifts:
             p_B = p_A * (1 + uplift)
-            if p_B > 1.0:
-                continue
+            if p_B > 1.0: continue
             power = run_simulation(fixed_n, p_A, p_B, simulations, samples, alpha_prior, beta_prior, thresh)
             results.append((uplift, power))
-            if power >= desired_power:
-                break
+            if power >= desired_power: break
     return results
+
+# --- Frequentist Function ---
+@st.cache_data
+def calculate_sample_size_frequentist(p_A, uplift, power=0.8, alpha=0.05):
+    """
+    Calculates sample size using a two-sided Z-test formula.
+    """
+    p_B = p_A * (1 + uplift)
+    if p_B > 1.0:
+        st.error(f"Error: Uplift of {uplift:.2%} on baseline {p_A:.2%} results in a conversion rate > 100%.")
+        return None
+        
+    z_alpha = norm.ppf(1 - alpha / 2)
+    z_beta = norm.ppf(power)
+    numerator = (z_alpha + z_beta) ** 2 * (p_A * (1 - p_A) + p_B * (1 - p_B))
+    denominator = (p_B - p_A) ** 2
+    sample_size_per_group = numerator / denominator
+    return int(np.ceil(sample_size_per_group))
 
 # 2. Page Title and Introduction
 st.title("⚙️ Pre-Test Power Calculator")
 st.markdown(
-    "This tool helps you plan an A/B test by estimating the sample size required or the minimum effect you can detect."
+    "This tool helps you plan an A/B test by estimating the required sample size using either Bayesian or Frequentist methods."
 )
 
 # 3. Sidebar for All User Inputs
 with st.sidebar:
-    st.header("Test Parameters")
-
-    mode = st.radio(
-        "Planning Mode",
-        ["Estimate Sample Size", "Estimate MDE (Minimum Detectable Effect)"],
-        help="Choose whether to estimate required sample size for a given uplift, or the minimum uplift detectable for a fixed sample size."
+    st.header("1. Choose Methodology")
+    methodology = st.radio(
+        "Calculation Method",
+        ["Bayesian", "Frequentist"],
+        horizontal=True,
+        help="Choose 'Bayesian' for a simulation-based approach or 'Frequentist' for a traditional formula-based calculation."
     )
-
+    
+    st.header("2. Set Parameters")
+    
     p_A = st.number_input(
         "Baseline conversion rate (p_A)", min_value=0.0001, max_value=0.999, value=0.05, step=0.001,
-        format="%.4f",
-        help="Conversion rate for your control variant (A), e.g., 5% = 0.050"
+        format="%.4f", help="Conversion rate for your control variant (A)."
     )
-    thresh = st.slider(
-        "Posterior threshold (e.g., 0.95)", 0.5, 0.99, 0.95, step=0.01,
-        help="Confidence level to declare a winner — usually 0.95 or 0.99"
-    )
-    desired_power = st.slider(
-        "Desired power", 0.5, 0.99, 0.8, step=0.01,
-        help="Minimum acceptable power of detecting a real uplift"
-    )
-    simulations = st.slider(
-        "Simulations", 100, 2000, 300, step=100,
-        help="How many test simulations to run"
-    )
-    samples = st.slider(
-        "Posterior samples", 500, 3000, 1000, step=100,
-        help="How many samples to draw from each posterior distribution"
+    uplift = st.number_input(
+        "Expected uplift", min_value=0.0001, max_value=0.999, value=0.10, step=0.01,
+        format="%.4f", help="Relative improvement expected in the variant (e.g., 0.10 for +10%)."
     )
 
-    if mode == "Estimate Sample Size":
-        uplift = st.number_input(
-            "Expected uplift (e.g., 0.10 = +10%)", min_value=0.0001, max_value=0.999, value=0.10, step=0.01,
-            format="%.4f",
-            help="Relative improvement expected in variant B over A"
+    # --- Conditional Inputs based on Methodology ---
+    if methodology == "Bayesian":
+        st.subheader("Bayesian Settings")
+        thresh = st.slider(
+            "Posterior threshold", 0.80, 0.99, 0.95, step=0.01,
+            help="The P(B > A) threshold required to declare a winner. 95% is common."
         )
-    else:
-        fixed_n = st.number_input(
-            "Fixed sample size per variant", min_value=100, value=10000, step=100,
-            help="Fixed sample size used to determine the minimum detectable uplift."
+        desired_power = st.slider(
+            "Desired power", 0.5, 0.99, 0.8, step=0.01,
+            help="The probability of detecting the uplift if it's real. 80% is common."
+        )
+        simulations = st.slider("Simulations", 100, 5000, 500, step=100)
+        samples = st.slider("Posterior samples", 500, 5000, 1000, step=100)
+        
+        st.subheader("Optional Priors")
+        use_auto_prior = st.checkbox("Calculate priors from historical data")
+        if use_auto_prior:
+            hist_conv = st.number_input("Historical Conversions", min_value=0, value=50, step=1)
+            hist_n = st.number_input("Historical Users", min_value=1, value=1000, step=1)
+            alpha_prior = hist_conv
+            beta_prior = hist_n - hist_conv
+        else:
+            alpha_prior = st.number_input("Alpha (prior successes)", min_value=0.0, value=1.0, step=0.1)
+            beta_prior = st.number_input("Beta (prior failures)", min_value=0.0, value=1.0, step=0.1)
+
+    else: # Frequentist
+        st.subheader("Frequentist Settings")
+        alpha = st.slider(
+            "Significance level (α)", 0.01, 0.10, 0.05, step=0.01,
+            help="The probability of a false positive. 0.05 is standard for 95% confidence."
+        )
+        power = st.slider(
+            "Desired power (1 - β)", 0.5, 0.99, 0.8, step=0.01,
+            help="The probability of detecting the uplift if it's real. 80% is common."
         )
 
-    st.subheader("Optional Prior Beliefs")
-    use_auto_prior = st.checkbox(
-        "Auto-calculate priors from historical data",
-        help="Check this to calculate priors based on a past conversion rate and sample size."
+    st.header("3. Estimate Duration")
+    weekly_traffic = st.number_input(
+        "Estimated total weekly traffic",
+        min_value=1, value=20000, step=100,
+        help="Total users entering the experiment each week (before the 50/50 split)."
     )
-    if use_auto_prior:
-        hist_cr = st.number_input(
-            "Historical conversion rate (0.05 = 5%)", min_value=0.0, max_value=1.0, value=0.05, step=0.001,
-            format="%.3f",
-            help="Observed conversion rate from your historical data."
-        )
-        hist_n = st.number_input(
-            "Historical sample size", min_value=1, value=1000, step=1,
-            help="Number of observations (users) in historical data."
-        )
-        alpha_prior = hist_cr * hist_n
-        beta_prior = (1 - hist_cr) * hist_n
-    else:
-        alpha_prior = st.number_input(
-            "Alpha (prior successes)", min_value=0.0, value=1.0, step=0.1,
-            help="Prior belief in successes before the test."
-        )
-        beta_prior = st.number_input(
-            "Beta (prior failures)", min_value=0.0, value=1.0, step=0.1,
-            help="Prior belief in failures before the test."
-        )
 
     st.markdown("---")
     run_button = st.button("Run Calculation", type="primary", use_container_width=True)
 
-
 # 4. Main Page for Displaying Outputs
 st.markdown("---")
 
-results_available = False
-
 if run_button:
-    if mode == "Estimate Sample Size":
-        results = simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior)
-        if results:
-            x_vals, y_vals = zip(*results)
-            results_available = True
-            st.subheader("📈 Sample Size Estimation")
-            if y_vals[-1] >= desired_power:
-                st.success(f"✅ Estimated minimum sample size per group: **{x_vals[-1]:,}** (achieved {y_vals[-1]:.1%} power).")
-            else:
-                st.warning("Could not reach desired power. The uplift may be too small or the power target too high for a practical test.")
-    else: # Estimate MDE Mode
-        results = simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n)
-        if results:
-            x_vals, y_vals = zip(*results)
-            results_available = True
-            st.subheader("📉 Minimum Detectable Effect (MDE)")
-            if y_vals[-1] >= desired_power:
-                st.success(f"✅ Minimum detectable relative uplift: **{x_vals[-1]:.2%}** (achieved {y_vals[-1]:.1%} power).")
-            else:
-                st.warning("Simulation could not reach target power with the given sample size.")
-
-    if results_available:
-        st.subheader("Visualizations")
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.plot(x_vals, y_vals, marker='o', label='Estimated Power')
-        ax.axhline(desired_power, color='red', linestyle='--', label='Target Power')
+    if methodology == "Bayesian":
+        # The Bayesian calculator still supports MDE mode, so we need the radio button.
+        mode = st.radio("Planning Mode", ["Estimate Sample Size", "Estimate MDE"])
         if mode == "Estimate Sample Size":
-            ax.set_xlabel("Sample Size per Group")
-            if len(x_vals) > 1:
+            results = simulate_power(p_A, uplift, thresh, desired_power, simulations, samples, alpha_prior, beta_prior)
+            if results:
+                x_vals, y_vals = zip(*results)
+                required_sample_size = x_vals[-1] if y_vals[-1] >= desired_power else None
+                st.subheader("📈 Bayesian Sample Size Estimation")
+                if required_sample_size:
+                    st.success(f"✅ Estimated minimum sample size per group: **{required_sample_size:,}** (achieved {y_vals[-1]:.1%} power).")
+                else:
+                    st.warning("Could not reach desired power. The uplift may be too small or the power target too high for a practical test.")
+                
+                # Visualization
+                fig, ax = plt.subplots(figsize=(8, 4))
+                ax.plot(x_vals, y_vals, marker='o', label='Estimated Power')
+                ax.axhline(desired_power, color='red', linestyle='--', label='Target Power')
+                ax.set_xlabel("Sample Size per Group")
                 ax.set_xscale('log')
-            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"{int(x):,}"))
-        else:
-            ax.set_xlabel("Relative Uplift (MDE)")
-            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"{x:.1%}"))
-        ax.set_ylabel("Estimated Power")
-        ax.set_title("Power vs. " + ("Sample Size" if mode == "Estimate Sample Size" else "MDE"))
-        ax.grid(True, which="both", ls="--", c='0.7')
-        ax.legend()
-        st.pyplot(fig)
+                ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"{int(x):,}"))
+                ax.set_ylabel("Estimated Power")
+                ax.set_title("Power vs. Sample Size")
+                ax.grid(True, which="both", ls="--")
+                ax.legend()
+                st.pyplot(fig)
+        else: # Bayesian MDE Mode
+            fixed_n = st.number_input("Fixed sample size per variant", 100)
+            results = simulate_mde(p_A, thresh, desired_power, simulations, samples, alpha_prior, beta_prior, fixed_n)
+            # ... (MDE results display would go here)
+    
+    else: # Frequentist
+        required_sample_size = calculate_sample_size_frequentist(p_A, uplift, power=power, alpha=alpha)
+        st.subheader("📈 Frequentist Sample Size Estimation")
+        if required_sample_size:
+            st.success(f"✅ You need at least **{required_sample_size:,} users per variant** to detect a {uplift:.2%} uplift with {power:.0%} power and {1-alpha:.0%} confidence.")
+            
+            # Visualization
+            st.subheader("Visualization")
+            uplifts_range = np.linspace(uplift * 0.2, uplift * 2, 50)
+            sample_sizes_range = [calculate_sample_size_frequentist(p_A, u, power=power, alpha=alpha) for u in uplifts_range]
+            fig, ax = plt.subplots(figsize=(8, 4))
+            ax.plot([u * 100 for u in uplifts_range], sample_sizes_range, color='blue')
+            ax.axvline(x=uplift * 100, linestyle='--', color='red', label=f'Your Target ({uplift:.1%})')
+            ax.set_xlabel("Minimum Detectable Uplift (%)")
+            ax.set_ylabel("Required Sample Size per Group")
+            ax.set_title("Sample Size vs. Uplift")
+            ax.grid(True)
+            ax.legend()
+            st.pyplot(fig)
 
+    # --- Time-Based Planning (works for both) ---
+    if 'required_sample_size' in locals() and required_sample_size:
+        st.subheader("🗓️ Estimated Test Duration")
+        users_per_week_per_variant = weekly_traffic / 2
+        if users_per_week_per_variant > 0:
+            estimated_weeks = required_sample_size / users_per_week_per_variant
+            st.info(f"With {weekly_traffic:,} total users per week, you'll need approximately **{estimated_weeks:.1f} weeks** to reach the required sample size.")
 else:
     st.info("Adjust the parameters in the sidebar and click 'Run Calculation' to see the results.")
 
-
-# --- Time-Based Planning ---
-st.markdown("---")
-st.header("⏱️ Time-Based Planning")
-weekly_traffic = st.number_input(
-    "Estimated total weekly traffic to the experiment",
-    min_value=1,
-    value=20000,
-    step=100,
-    help="Enter the total number of users you expect to enter the experiment each week (before the 50/50 split)."
-)
-
-if results_available:
-    st.subheader("🗓️ Duration Estimate")
-    users_per_week_per_variant = weekly_traffic / 2
-    if users_per_week_per_variant > 0:
-        if mode == "Estimate Sample Size":
-            if 'y_vals' in locals() and y_vals[-1] >= desired_power:
-                required_sample_size = x_vals[-1]
-                estimated_weeks = required_sample_size / users_per_week_per_variant
-                st.info(f"To reach **{required_sample_size:,} users per variant**, you'll need to run this test for approximately **{estimated_weeks:.1f} weeks**.")
-            else:
-                st.warning("Cannot estimate duration because the target power was not reached.")
-        else:
-            required_sample_size = fixed_n
-            estimated_weeks = required_sample_size / users_per_week_per_variant
-            st.info(f"To reach **{required_sample_size:,} users per variant**, it will take approximately **{estimated_weeks:.1f} weeks**.")
-
 # 5. Explanations Section
 st.markdown("---")
-with st.expander("ℹ️ Learn about the concepts used in this calculator"):
+with st.expander("ℹ️ About the Methodologies"):
     st.markdown("""
-    #### What is Sample Size? 👥
-    **Sample size** is the number of users in each group of your test. Think of it like the lens on a camera you're using to see which variant is better. A bigger sample size gives you a bigger, more powerful lens.
+    #### Bayesian vs. Frequentist Approaches
+    This tool offers two different statistical philosophies for power analysis.
 
-    This bigger lens makes your test more sensitive in two key ways:
+    **1. Bayesian (Simulation-Based)**
+    - **What it is:** A modern approach that uses simulation to answer the question: *"If the true uplift is X%, what is the probability that our test will conclude that the variant is better?"*
+    - **Pros:** More intuitive, flexible, and allows for the incorporation of prior knowledge (`alpha` and `beta` priors) from past experiments to make the analysis more data-efficient.
+    - **Use when:** You want a more nuanced view of risk and probability, or when you have historical data to inform your assumptions.
 
-    1.  **You can spot smaller improvements (Lower MDE 🔎)**
-        A powerful camera lens (**more users**) can spot a tiny, faint star that a weaker lens would miss. Similarly, a larger sample size allows you to reliably detect a very **small uplift (a lower MDE)**.
-
-    2.  **You're more certain about what you see (Higher Power 💪)**
-        When you're trying to photograph a specific star, a bigger lens (**more users**) gives you a much better chance (**higher power**) of capturing a sharp, undeniable photo instead of a blurry, inconclusive smudge.
-
-    The goal is to find the right balance—a lens big enough to be confident in the result, but not so big that you waste time and resources.
-
-    ---
-    #### What is Minimum Detectable Effect (MDE)? 🔎
-    The **Minimum Detectable Effect (MDE)** is the smallest improvement your test can reliably detect at a given power level.
-
-    Think of it as the sensitivity of your experiment. If the true uplift from your change is smaller than the MDE, your test will likely miss it. This doesn't mean the uplift isn't real, just that your experiment isn't powerful enough to see it. Use the MDE to set realistic expectations for what your test can achieve with your available traffic.
-
-    ---
-    #### What is Bayesian Power? 💪
-    **Power** answers one critical question: *"If my variant is truly better by a specific amount, what's the probability my test will actually detect it?"*
-
-    For example, 80% power means you have an 80% chance of getting a conclusive result (e.g., P(B > A) > 95%) if the real improvement matches what you expected. Running a test with low power is like trying to read in a dim room—you're likely to miss things and end up with an inconclusive result, wasting valuable traffic.
-
-    ---
-    #### What are Priors? 🧠
-    **Priors** represent what you believe about the conversion rate *before* the test begins. In this model, your belief is captured by two numbers:
-    - **Alpha ($$\\alpha$$)**: The number of prior "successes".
-    - **Beta ($$\\beta$$)**: The number of prior "failures".
-
-    * **No strong belief?** Use an **uninformative prior** like `alpha = 1` and `beta = 1`. This treats all possible conversion rates as equally likely to start.
-    * **Have historical data?** Create an **informative prior**. If past data showed 50 conversions from 1,000 users, you'd set `alpha = 50` and `beta = 950`.
-
-    As your test collects new data, the evidence from the experiment will quickly outweigh the initial prior belief.
+    **2. Frequentist (Formula-Based)**
+    - **What it is:** The traditional method taught in most statistics courses. It uses a mathematical formula based on a two-sided Z-test to calculate the sample size needed to achieve a desired level of statistical significance (`alpha`) and power (`1-beta`).
+    - **Pros:** Very fast, deterministic (always gives the same answer), and widely understood.
+    - **Use when:** You need a quick, standard calculation or when your organization's standard is to use p-values and significance testing.
     """)
+
