@@ -110,7 +110,6 @@ GEO_DEFAULTS = pd.DataFrame({
 ALL_REGIONS = GEO_DEFAULTS["Region"].tolist()
 
 def reset_app_state():
-    """Clears all session state variables to reset the app."""
     st.session_state.clear()
 
 # --- UI ---
@@ -165,14 +164,22 @@ if calculate_geo_spend:
             submitted = st.form_submit_button("Confirm Region Selection")
             if submitted:
                 st.session_state.selected_regions = temp_selections
-                st.session_state["custom_geo_data_editor"] = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
+                st.session_state["custom_geo_data_editor_df"] = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
                 st.rerun()
+        
         if spend_mode == 'Custom':
             st.markdown("---")
             st.write("Edit weights and CPMs below. Your edits will be saved automatically.")
-            if "custom_geo_data_editor" not in st.session_state:
-                st.session_state["custom_geo_data_editor"] = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.get('selected_regions', ALL_REGIONS))].copy()
-            edited_df = st.data_editor(st.session_state["custom_geo_data_editor"], num_rows="dynamic", use_container_width=True, key="custom_geo_data_editor")
+            if 'custom_geo_data_editor_df' not in st.session_state:
+                st.session_state.custom_geo_data_editor_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.get('selected_regions', ALL_REGIONS))].copy()
+            
+            # The editor widget is now the single, reliable source of truth.
+            edited_df = st.data_editor(
+                st.session_state.custom_geo_data_editor_df, 
+                num_rows="dynamic", 
+                use_container_width=True, 
+                key="custom_geo_editor" # This key holds the output
+            )
             current_sum = edited_df['Weight'].sum()
             st.metric(label="Current Weight Sum", value=f"{current_sum:.2%}", delta=f"{(current_sum - 1.0):.2%} from target")
             if not np.isclose(current_sum, 1.0): st.warning("Sum of weights must be 100%.")
@@ -195,15 +202,16 @@ if submit:
     total_users = req_n * num_groups if req_n else 0
     
     if calculate_geo_spend and req_n:
-        if st.session_state.get('selected_regions', ALL_REGIONS):
+        selected_regions = st.session_state.get('selected_regions', ALL_REGIONS)
+        if selected_regions:
             geo_df = pd.DataFrame()
             if spend_mode == "Custom":
-                geo_df = pd.DataFrame(st.session_state.get("custom_geo_data_editor", []))
-                if geo_df.empty: geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.get('selected_regions', ALL_REGIONS))].copy()
+                geo_df = pd.DataFrame(st.session_state.get("custom_geo_editor", []))
+                if geo_df.empty: geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(selected_regions)].copy()
                 if not np.isclose(geo_df['Weight'].sum(), 1.0):
                     st.error("Final check failed: Custom weights must sum to 1.0."); geo_df = pd.DataFrame()
             else:
-                base_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.get('selected_regions', ALL_REGIONS))].copy()
+                base_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(selected_regions)].copy()
                 if not base_df.empty:
                     if spend_mode == "Population-based": base_df["Weight"] /= base_df["Weight"].sum()
                     else: base_df["Weight"] = 1 / len(base_df)
@@ -227,7 +235,6 @@ if submit:
             col3.metric("Total Users Required", f"{total_users:,}")
             if total_spend is not None: col4.metric("Total Estimated Ad Spend", f"£{total_spend:,.0f}")
             else: col4.metric("Total Estimated Ad Spend", "N/A", help="Enable Geo Spend to calculate.")
-            
             st.markdown("---")
             summary_text = f"For a test with **{num_groups} groups**, you will need **{req_n:,} users per group**, for a total of **{total_users:,} users**."
             if total_spend is not None: summary_text += f" This corresponds to an estimated ad spend of **£{total_spend:,.0f}**."
@@ -243,7 +250,6 @@ if submit:
             mde_results = calculate_mde_frequentist(p_A, fixed_n, desired_power, alpha, num_variants)
         else: # Bayesian
             mde_results = simulate_mde_bayesian(p_A, fixed_n, desired_power, sims, samples, 1, 1, num_variants)
-        
         if mde_results and mde_results[-1][1] >= desired_power:
             mde, achieved_power = mde_results[-1]
             st.success(f"With **{fixed_n:,} users** per group, the smallest uplift you can reliably detect is **{mde:.2%}** (with {achieved_power:.1%} power).")
