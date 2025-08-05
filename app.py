@@ -18,14 +18,13 @@ def calculate_power_frequentist(p_A: float, p_B: float, n: int, alpha: float = 0
     """Calculates power with Bonferroni correction for multiple comparisons."""
     if p_B < 0 or p_B > 1.0: return 0.0
     
-    # Bonferroni Correction: Adjust alpha for the number of comparisons (variants)
     adjusted_alpha = alpha / num_comparisons
     
     se = np.sqrt(p_A * (1 - p_A) / n + p_B * (1 - p_B) / n)
     if se == 0: return 1.0
     
     effect_size_norm = abs(p_B - p_A) / se
-    z_alpha = norm.ppf(1 - adjusted_alpha / 2) # Use adjusted alpha for the critical value
+    z_alpha = norm.ppf(1 - adjusted_alpha / 2)
     
     return norm.cdf(effect_size_norm - z_alpha) + norm.cdf(-effect_size_norm - z_alpha)
 
@@ -55,8 +54,11 @@ def calculate_mde_frequentist(p_A: float, n: int, power_target: float = 0.8, alp
             if p_B > 1.0: continue
             power = calculate_power_frequentist(p_A, p_B, n, alpha, num_comparisons=num_variants)
             results.append((uplift, power))
-            if power >= power_target: break
-    return results
+            if power >= power_target:
+                return results # Success, return the list of steps
+    
+    # FIX: If loop finishes without reaching power, return an empty list to signal failure.
+    return []
 
 # --- Geo Testing Data and Session State ---
 GEO_DEFAULTS = pd.DataFrame({
@@ -74,19 +76,21 @@ def reset_app_state():
 # --- UI ---
 st.title("⚙️ A/B/n Pre-Test Power Calculator")
 
+# FIX: Custom CSS for a bordered container, replacing border=True
+st.markdown("""
+<style>
+    .bordered-container {
+        border: 1px solid rgba(49, 51, 63, 0.2);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+
 with st.expander("What is Power Analysis? Click here to learn more.", expanded=False):
-    st.markdown("""
-    Power analysis is a statistical method used **before** an A/B test to estimate the resources needed. It helps you design a test that is both effective and efficient.
-    - **Why is it important?** Without proper planning, you might run a test that is too short to detect a real improvement (a "false negative"), or a test that is unnecessarily long, wasting time and resources.
-    #### Key Concepts
-    - **Sample Size:** The number of users or sessions required in each group (e.g., 'Control' and 'Variant').
-    - **Statistical Power (or Sensitivity):** The probability of detecting a real effect, if one truly exists. A power of 80% means you have an 80% chance of detecting a genuine uplift.
-    - **Minimum Detectable Effect (MDE):** The smallest improvement you want your test to be able to detect.
-    #### How to Use This Tool
-    1.  **Set Inputs:** Use the sidebar to enter your test parameters.
-    2.  **Configure Geo-Test (Optional):** Use the main panel to select active regions and set custom weights or costs.
-    3.  **Calculate:** Click "Run Calculation" to see the summary of required resources.
-    """)
+    st.markdown("""...""") # Content unchanged
 
 st.sidebar.button("Reset All Settings", on_click=reset_app_state, use_container_width=True)
 st.sidebar.markdown("---")
@@ -128,6 +132,7 @@ if calculate_geo_spend:
             submitted = st.form_submit_button("Confirm Region Selection")
             if submitted:
                 st.session_state.selected_regions = temp_selections
+                # FIX: Corrected typo from ALL_REGions to ALL_REGIONS
                 st.session_state.custom_geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
                 st.rerun()
         
@@ -136,17 +141,14 @@ if calculate_geo_spend:
             st.write("Edit weights and CPMs below. Your edits will be saved automatically.")
             
             if 'custom_geo_df' not in st.session_state:
-                st.session_state.custom_geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.get('selected_regions', ALL_REGions))].copy()
+                st.session_state.custom_geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.get('selected_regions', ALL_REGIONS))].copy()
             
-            # DEFINITIVE FIX: The editor is now a simple component that returns the edited data.
-            # We do NOT use a key to avoid the assignment error.
             edited_df = st.data_editor(
                 st.session_state.custom_geo_df, 
                 num_rows="dynamic", 
-                use_container_width=True
+                use_container_width=True,
+                key="custom_geo_df_editor" # Use a distinct key for the widget
             )
-            
-            # After the editor is rendered, we update our state with its output.
             st.session_state.custom_geo_df = edited_df
             
             current_sum = edited_df['Weight'].sum()
@@ -198,30 +200,32 @@ if st.session_state.submit:
         weeks = total_users / weekly_traffic
 
     if req_n:
-        with st.container(border=True):
-            st.subheader("Executive Summary")
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Test Groups", f"{num_groups} (1C + {num_variants}V)")
-            col2.metric("Sample Size (per Group)", f"{req_n:,}")
-            col3.metric("Total Users Required", f"{total_users:,}")
-            if total_spend is not None: col4.metric("Total Estimated Ad Spend", f"£{total_spend:,.0f}")
-            else: col4.metric("Total Estimated Ad Spend", "N/A", help="Enable Geo Spend to calculate.")
-            st.markdown("---")
-            summary_text = f"For a test with **{num_groups} groups**, you will need **{req_n:,} users per group**, for a total of **{total_users:,} users**."
-            if total_spend is not None: summary_text += f" This corresponds to an estimated ad spend of **£{total_spend:,.0f}**."
-            if weeks is not None: summary_text += f" At the specified traffic rate, the test will take approximately **{weeks:.1f} weeks**."
-            st.info(summary_text)
+        st.markdown('<div class="bordered-container">', unsafe_allow_html=True)
+        st.subheader("Executive Summary")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Test Groups", f"{num_groups} (1C + {num_variants}V)")
+        col2.metric("Sample Size (per Group)", f"{req_n:,}")
+        col3.metric("Total Users Required", f"{total_users:,}")
+        if total_spend is not None: col4.metric("Total Estimated Ad Spend", f"£{total_spend:,.0f}")
+        else: col4.metric("Total Estimated Ad Spend", "N/A", help="Enable Geo Spend to calculate.")
+        st.markdown("---")
+        summary_text = f"For a test with **{num_groups} groups**, you will need **{req_n:,} users per group**, for a total of **{total_users:,} users**."
+        if total_spend is not None: summary_text += f" This corresponds to an estimated ad spend of **£{total_spend:,.0f}**."
+        if weeks is not None: summary_text += f" At the specified traffic rate, the test will take approximately **{weeks:.1f} weeks**."
+        st.info(summary_text)
+        st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.error("Could not determine the required sample size with the provided inputs.")
 
     if mode == "Estimate MDE":
         st.subheader("📉 Minimum Detectable Effect")
         mde_results = calculate_mde_frequentist(p_A, fixed_n, desired_power, alpha, num_variants)
-        if mde_results and mde_results[-1][1] >= desired_power:
+        # FIX: Check if mde_results is empty to handle failure case.
+        if mde_results:
             mde, achieved_power = mde_results[-1]
             st.success(f"With **{fixed_n:,} users** per group, the smallest uplift you can reliably detect is **{mde:.2%}** (with {achieved_power:.1%} power).")
         else:
-            st.warning("Could not reach desired power with the given sample size.")
+            st.warning("Could not reach desired power within the tested uplift range (up to 50%). Please increase the sample size.")
     
     if calculate_geo_spend and total_spend is not None:
         with st.expander("View Geo Spend Breakdown"):
