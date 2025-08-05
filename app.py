@@ -169,16 +169,24 @@ if calculate_geo_spend:
 
         if spend_mode == 'Custom':
             st.markdown("---")
-            # --- DEFINITIVE FIX FOR THE CUSTOM EDITOR ---
-            # 1. First, if the editor has been used, immediately update our master dataframe with its state.
-            if "custom_geo_editor" in st.session_state:
-                st.session_state.geo_df_custom.update(st.session_state["custom_geo_editor"])
             
-            # 2. Then, create the dataframe to be displayed in the editor from the (now updated) master dataframe.
+            # --- DEFINITIVE FIX FOR THE CUSTOM EDITOR ---
+            # 1. First, if the editor's state exists, convert it to a DataFrame.
+            if "custom_geo_editor" in st.session_state:
+                edited_data_from_state = pd.DataFrame(st.session_state["custom_geo_editor"])
+                
+                # 2. Use 'Region' as the key to robustly update the master DataFrame.
+                # This prevents index ambiguity and solves the ValueError.
+                master_df = st.session_state.geo_df_custom.set_index('Region')
+                updates_df = edited_data_from_state.set_index('Region')
+                master_df.update(updates_df)
+                st.session_state.geo_df_custom = master_df.reset_index()
+
+            # 3. Create the dataframe to be displayed from the (now updated) master dataframe.
             editor_display_df = st.session_state.geo_df_custom[st.session_state.geo_df_custom['Region'].isin(st.session_state.selected_regions)].copy()
             
             if not editor_display_df.empty:
-                # 3. Finally, render the editor. Its state is now managed correctly.
+                # 4. Finally, render the editor. Its state is now managed correctly.
                 st.data_editor(
                     editor_display_df, 
                     num_rows="dynamic", 
@@ -186,8 +194,7 @@ if calculate_geo_spend:
                     key="custom_geo_editor"
                 )
                 
-                # Display metrics based on the editor's current state.
-                current_sum = st.session_state["custom_geo_editor"]['Weight'].sum()
+                current_sum = editor_display_df['Weight'].sum()
                 st.metric(label="Current Weight Sum", value=f"{current_sum:.2%}", delta=f"{(current_sum - 1.0):.2%} from target")
                 if not np.isclose(current_sum, 1.0):
                     st.warning("Sum of weights must be 100%.")
@@ -211,13 +218,10 @@ if submit:
         if st.session_state.selected_regions:
             geo_df = pd.DataFrame()
             if spend_mode == "Custom":
-                # When calculating, the editor's state is the source of truth.
-                if "custom_geo_editor" in st.session_state:
-                    geo_df = st.session_state["custom_geo_editor"].copy()
-                    if not np.isclose(geo_df['Weight'].sum(), 1.0):
-                        st.error("Final check failed: Custom weights must sum to 1.0."); geo_df = pd.DataFrame()
-                else: # Fallback if editor was never rendered
-                    geo_df = st.session_state.geo_df_custom[st.session_state.geo_df_custom['Region'].isin(st.session_state.selected_regions)].copy()
+                # For custom mode, the source of truth is our master custom dataframe
+                geo_df = st.session_state.geo_df_custom[st.session_state.geo_df_custom['Region'].isin(st.session_state.selected_regions)].copy()
+                if not np.isclose(geo_df['Weight'].sum(), 1.0):
+                    st.error("Final check failed: Custom weights must sum to 1.0."); geo_df = pd.DataFrame()
             else:
                 base_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
                 if not base_df.empty:
