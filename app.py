@@ -95,7 +95,6 @@ DEFAULT_CPMS = [7.50, 8.00, 8.25, 7.00, 7.80, 8.10, 12.00, 10.00, 7.60, 6.90, 9.
 # Build geo DataFrame
 def build_geo_df(regions, weights, cpms):
     df = pd.DataFrame({"Region": regions, "Weight": weights, "CPM (£)": cpms})
-    # Normalize weights to ensure they sum to 1
     if df["Weight"].sum() > 0:
         df["Weight"] /= df["Weight"].sum()
     return df
@@ -140,11 +139,27 @@ with st.sidebar.form("params_form"):
     weekly_traffic = st.number_input("Weekly traffic", 1, 100000, 20000)
     calculate_geo_spend = st.checkbox("Calculate Geo Spend", value=False)
     
+    # --- NEW: Geo Spend configuration moved inside the form ---
+    if calculate_geo_spend and methodology == "Frequentist":
+        with st.expander("Configure Geo Spend Data"):
+            spend_mode = st.radio("Spend Weighting Mode", ["Population-based", "Equal", "Custom"], index=1, horizontal=True)
+            
+            if spend_mode == "Custom":
+                st.caption("Edit regional weights and CPMs as needed.")
+                # Use session state to persist the edited dataframe
+                if 'geo_df_custom' not in st.session_state:
+                    st.session_state.geo_df_custom = build_geo_df(UK_REGIONS, POP_WEIGHTS, DEFAULT_CPMS)
+                
+                edited_df = st.data_editor(st.session_state.geo_df_custom, num_rows="dynamic")
+                st.session_state.geo_df_custom = edited_df
+
     submit = st.form_submit_button("Run Calculation")
 
 if submit:
     st.header("Results")
-    # Compute sample size or MDE
+    req_n = None # Initialize req_n
+    
+    # --- Main Calculation Logic ---
     if methodology == "Frequentist":
         if mode == "Estimate Sample Size":
             req_n = calculate_sample_size_frequentist(p_A, uplift, desired_power, alpha)
@@ -180,31 +195,21 @@ if submit:
             else:
                 st.warning("Could not reach desired power.")
 
-    # Geo Spend
-    if calculate_geo_spend and methodology == "Frequentist" and 'req_n' in locals() and req_n:
-        total_users = req_n * 2
+    # --- Geo Spend Display Logic ---
+    if calculate_geo_spend and methodology == "Frequentist" and req_n:
         st.subheader("💰 Geo Ad Spend")
-        spend_mode = st.radio("Spend Weighting Mode", ["Population-based", "Equal", "Custom"], index=1, horizontal=True)
-        
         if spend_mode == "Equal":
-            weights = [1/len(UK_REGIONS)] * len(UK_REGIONS)
-            cpms = DEFAULT_CPMS
-            geo_df = build_geo_df(UK_REGIONS, weights, cpms)
+            geo_df = build_geo_df(UK_REGIONS, [1]*len(UK_REGIONS), DEFAULT_CPMS)
         elif spend_mode == "Population-based":
-            weights = POP_WEIGHTS
-            cpms = DEFAULT_CPMS
-            geo_df = build_geo_df(UK_REGIONS, weights, cpms)
+            geo_df = build_geo_df(UK_REGIONS, POP_WEIGHTS, DEFAULT_CPMS)
         else: # Custom
-            st.caption("Edit regional weights and CPMs as needed. Weights must sum to 100%.")
-            default_df = build_geo_df(UK_REGIONS, POP_WEIGHTS, DEFAULT_CPMS)
-            edited_df = st.data_editor(default_df, num_rows="dynamic")
-            if not np.isclose(edited_df["Weight"].sum(), 1.0):
-                st.error("Custom weights must sum to 1.0 (or 100%). Please adjust.")
-                geo_df = pd.DataFrame() # Empty df to prevent calculation
-            else:
-                geo_df = edited_df
+            geo_df = st.session_state.geo_df_custom
+            if not np.isclose(geo_df["Weight"].sum(), 1.0):
+                st.error("Custom weights must sum to 1.0. Please adjust in the sidebar.")
+                geo_df = pd.DataFrame() # Prevent calculation with invalid weights
 
         if not geo_df.empty:
+            total_users = req_n * 2
             geo_df["Users"] = geo_df["Weight"] * total_users
             geo_df["Impressions (k)"] = geo_df["Users"] / 1000
             geo_df["Spend (£)"] = geo_df["Impressions (k)"] * geo_df["CPM (£)"]
@@ -217,14 +222,13 @@ if submit:
             ax.set_title("Geo Spend Breakdown")
             st.pyplot(fig)
 
-    # Duration
-    if 'req_n' in locals() and req_n:
+    # --- Duration & Power Curve ---
+    if req_n:
         st.subheader("🗓️ Estimated Test Duration")
         weeks = req_n / (weekly_traffic/2)
         st.info(f"You will need approximately **{weeks:.1f} weeks** to reach the required sample size.")
 
-    # Power curve for Frequentist
-    if methodology == "Frequentist" and mode == "Estimate Sample Size" and 'req_n' in locals() and req_n:
+    if methodology == "Frequentist" and mode == "Estimate Sample Size" and req_n:
         st.subheader("🔬 Sample Size vs. Uplift")
         uplifts = np.linspace(uplift*0.5, uplift*1.5, 50)
         sizes = [calculate_sample_size_frequentist(p_A, u, desired_power, alpha) for u in uplifts if u > 0 and p_A*(1+u)<=1]
