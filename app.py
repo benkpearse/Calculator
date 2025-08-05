@@ -35,12 +35,13 @@ def calculate_sample_size_frequentist(p_A: float, uplift: float, power_target: f
     p_B = p_A * (1 + uplift)
     if p_B >= 1: return None
     n, power, MAX_SAMPLE_SIZE = 100, 0, 5_000_000
-    while power < power_target and n < MAX_SAMPLE_SIZE:
-        power = calculate_power_frequentist(p_A, p_B, n, alpha, num_comparisons=num_variants)
-        if power >= power_target: return int(n)
-        if n < 1000: n += 50
-        elif n < 20000: n = int(n * 1.2)
-        else: n = int(n * 1.1)
+    with st.spinner("Calculating sample size..."):
+        while power < power_target and n < MAX_SAMPLE_SIZE:
+            power = calculate_power_frequentist(p_A, p_B, n, alpha, num_comparisons=num_variants)
+            if power >= power_target: return int(n)
+            if n < 1000: n += 50
+            elif n < 20000: n = int(n * 1.2)
+            else: n = int(n * 1.1)
     if n >= MAX_SAMPLE_SIZE: return None
     return int(n)
 
@@ -48,12 +49,13 @@ def calculate_sample_size_frequentist(p_A: float, uplift: float, power_target: f
 def calculate_mde_frequentist(p_A: float, n: int, power_target: float = 0.8, alpha: float = 0.05, num_variants: int = 1) -> List[Tuple[float, float]]:
     """Calculates MDE by iteratively searching for the uplift that meets the target power."""
     results = []
-    for uplift in np.linspace(0.001, 0.50, 100):
-        p_B = p_A * (1 + uplift)
-        if p_B > 1.0: continue
-        power = calculate_power_frequentist(p_A, p_B, n, alpha, num_comparisons=num_variants)
-        results.append((uplift, power))
-        if power >= power_target: break
+    with st.spinner("Calculating Minimum Detectable Effect..."):
+        for uplift in np.linspace(0.001, 0.50, 100):
+            p_B = p_A * (1 + uplift)
+            if p_B > 1.0: continue
+            power = calculate_power_frequentist(p_A, p_B, n, alpha, num_comparisons=num_variants)
+            results.append((uplift, power))
+            if power >= power_target: break
     return results
 
 # --- Geo Testing Data and Session State ---
@@ -67,6 +69,7 @@ ALL_REGIONS = GEO_DEFAULTS["Region"].tolist()
 def reset_app_state():
     """Clears all session state variables to reset the app."""
     st.session_state.clear()
+    st.rerun()
 
 # --- UI ---
 st.title("⚙️ A/B/n Pre-Test Power Calculator")
@@ -125,7 +128,6 @@ if calculate_geo_spend:
             submitted = st.form_submit_button("Confirm Region Selection")
             if submitted:
                 st.session_state.selected_regions = temp_selections
-                # DEFINITIVE FIX: Use one consistent key and initialize the DataFrame.
                 st.session_state.custom_geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
                 st.rerun()
         
@@ -133,17 +135,20 @@ if calculate_geo_spend:
             st.markdown("---")
             st.write("Edit weights and CPMs below. Your edits will be saved automatically.")
             
-            # Initialize the custom df if it doesn't exist
             if 'custom_geo_df' not in st.session_state:
-                st.session_state.custom_geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.get('selected_regions', ALL_REGIONS))].copy()
+                st.session_state.custom_geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.get('selected_regions', ALL_REGions))].copy()
             
-            # The editor now directly reads from and writes to the same session state key.
+            # DEFINITIVE FIX: The editor is now a simple component that returns the edited data.
+            # We do NOT use a key to avoid the assignment error.
             edited_df = st.data_editor(
                 st.session_state.custom_geo_df, 
                 num_rows="dynamic", 
-                use_container_width=True, 
-                key="custom_geo_df" # This key is now the single source of truth
+                use_container_width=True
             )
+            
+            # After the editor is rendered, we update our state with its output.
+            st.session_state.custom_geo_df = edited_df
+            
             current_sum = edited_df['Weight'].sum()
             st.metric(label="Current Weight Sum", value=f"{current_sum:.2%}", delta=f"{(current_sum - 1.0):.2%} from target")
             if not np.isclose(current_sum, 1.0): st.warning("Sum of weights must be 100%.")
@@ -151,7 +156,12 @@ if calculate_geo_spend:
 st.markdown("---")
 submit = st.sidebar.button("Run Calculation", type="primary", use_container_width=True)
 
+if 'submit' not in st.session_state:
+    st.session_state.submit = False
 if submit:
+    st.session_state.submit = True
+
+if st.session_state.submit:
     st.header("Results")
     req_n, total_spend, weeks = None, None, None
     num_groups = 1 + num_variants
@@ -168,7 +178,6 @@ if submit:
         if selected_regions:
             geo_df = pd.DataFrame()
             if spend_mode == "Custom":
-                # DEFINITIVE FIX: Read directly from the consistent session state key.
                 geo_df = st.session_state.get("custom_geo_df", pd.DataFrame()).copy()
                 if not np.isclose(geo_df['Weight'].sum(), 1.0):
                     st.error("Final check failed: Custom weights must sum to 1.0."); geo_df = pd.DataFrame()
