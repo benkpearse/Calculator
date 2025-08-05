@@ -95,7 +95,9 @@ DEFAULT_CPMS = [7.50, 8.00, 8.25, 7.00, 7.80, 8.10, 12.00, 10.00, 7.60, 6.90, 9.
 # Build geo DataFrame
 def build_geo_df(regions, weights, cpms):
     df = pd.DataFrame({"Region": regions, "Weight": weights, "CPM (£)": cpms})
-    df["Weight"] /= df["Weight"].sum()
+    # Normalize weights to ensure they sum to 1
+    if df["Weight"].sum() > 0:
+        df["Weight"] /= df["Weight"].sum()
     return df
 
 # --- UI ---
@@ -148,7 +150,7 @@ if submit:
             req_n = calculate_sample_size_frequentist(p_A, uplift, desired_power, alpha)
             st.subheader("📈 Required Sample Size")
             if req_n: st.success(f"**{req_n:,} per variant**")
-            else: st.error("Unable to compute sample size.")
+            else: st.error("Unable to compute sample size. Uplift may be too high.")
         else: # MDE
             results = calculate_mde_frequentist(p_A, fixed_n, desired_power, alpha)
             req_n = fixed_n
@@ -183,30 +185,37 @@ if submit:
         total_users = req_n * 2
         st.subheader("💰 Geo Ad Spend")
         spend_mode = st.radio("Spend Weighting Mode", ["Population-based", "Equal", "Custom"], index=1, horizontal=True)
+        
         if spend_mode == "Equal":
             weights = [1/len(UK_REGIONS)] * len(UK_REGIONS)
             cpms = DEFAULT_CPMS
+            geo_df = build_geo_df(UK_REGIONS, weights, cpms)
         elif spend_mode == "Population-based":
             weights = POP_WEIGHTS
             cpms = DEFAULT_CPMS
+            geo_df = build_geo_df(UK_REGIONS, weights, cpms)
         else: # Custom
-            with st.expander("Advanced: Edit Weights & CPMs"):
-                default_df = build_geo_df(UK_REGIONS, POP_WEIGHTS, DEFAULT_CPMS)
-                edited = st.data_editor(default_df, num_rows="dynamic")
-                weights = edited["Weight"].tolist()
-                cpms = edited["CPM (£)"].tolist()
-        
-        geo_df = build_geo_df(UK_REGIONS, weights, cpms)
-        geo_df["Users"] = geo_df["Weight"] * total_users
-        geo_df["Impressions (k)"] = geo_df["Users"] / 1000
-        geo_df["Spend (£)"] = geo_df["Impressions (k)"] * geo_df["CPM (£)"]
-        st.dataframe(geo_df.style.format({"Weight":"{:.1%}","CPM (£)":"£{:.2f}","Spend (£)":"£{:,.2f}"}))
-        st.download_button("Download CSV", geo_df.to_csv(index=False), file_name="geo_spend.csv")
-        fig, ax = plt.subplots(figsize=(8,4))
-        ax.barh(geo_df["Region"], geo_df["Spend (£)"])
-        ax.set_xlabel("Spend (£)")
-        ax.set_title("Geo Spend Breakdown")
-        st.pyplot(fig)
+            st.caption("Edit regional weights and CPMs as needed. Weights must sum to 100%.")
+            default_df = build_geo_df(UK_REGIONS, POP_WEIGHTS, DEFAULT_CPMS)
+            edited_df = st.data_editor(default_df, num_rows="dynamic")
+            if not np.isclose(edited_df["Weight"].sum(), 1.0):
+                st.error("Custom weights must sum to 1.0 (or 100%). Please adjust.")
+                geo_df = pd.DataFrame() # Empty df to prevent calculation
+            else:
+                geo_df = edited_df
+
+        if not geo_df.empty:
+            geo_df["Users"] = geo_df["Weight"] * total_users
+            geo_df["Impressions (k)"] = geo_df["Users"] / 1000
+            geo_df["Spend (£)"] = geo_df["Impressions (k)"] * geo_df["CPM (£)"]
+            st.dataframe(geo_df.style.format({"Weight":"{:.1%}","CPM (£)":"£{:.2f}","Spend (£)":"£{:,.2f}"}))
+            st.download_button("Download CSV", geo_df.to_csv(index=False), file_name="geo_spend.csv")
+            
+            fig, ax = plt.subplots(figsize=(8,4))
+            ax.barh(geo_df["Region"], geo_df["Spend (£)"])
+            ax.set_xlabel("Spend (£)")
+            ax.set_title("Geo Spend Breakdown")
+            st.pyplot(fig)
 
     # Duration
     if 'req_n' in locals() and req_n:
