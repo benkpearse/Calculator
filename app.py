@@ -55,9 +55,7 @@ def calculate_mde_frequentist(p_A: float, n: int, power_target: float = 0.8, alp
             power = calculate_power_frequentist(p_A, p_B, n, alpha, num_comparisons=num_variants)
             results.append((uplift, power))
             if power >= power_target:
-                return results # Success, return the list of steps
-    
-    # FIX: If loop finishes without reaching power, return an empty list to signal failure.
+                return results
     return []
 
 # --- Geo Testing Data and Session State ---
@@ -76,7 +74,6 @@ def reset_app_state():
 # --- UI ---
 st.title("⚙️ A/B/n Pre-Test Power Calculator")
 
-# FIX: Custom CSS for a bordered container, replacing border=True
 st.markdown("""
 <style>
     .bordered-container {
@@ -87,7 +84,6 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
 
 with st.expander("What is Power Analysis? Click here to learn more.", expanded=False):
     st.markdown("""...""") # Content unchanged
@@ -117,10 +113,11 @@ else:
 
 st.sidebar.header("3. Geo Spend Configuration")
 calculate_geo_spend = st.sidebar.checkbox("Calculate Geo Spend", value=True, key='calculate_geo_spend', help="Enable to plan ad spend for a geo-based test.")
+
+# FIX: Combined the geo-spend logic into a single block to prevent NameError
 if calculate_geo_spend:
     spend_mode = st.sidebar.radio("Weighting Mode", ["Population-based", "Equal", "Custom"], index=0, horizontal=True, key='spend_mode', help="How to distribute sample size across active regions.")
-
-if calculate_geo_spend:
+    
     with st.expander("Configure Active Regions and Custom Data", expanded=False):
         with st.form("region_selection_form"):
             temp_selections = []
@@ -132,7 +129,6 @@ if calculate_geo_spend:
             submitted = st.form_submit_button("Confirm Region Selection")
             if submitted:
                 st.session_state.selected_regions = temp_selections
-                # FIX: Corrected typo from ALL_REGions to ALL_REGIONS
                 st.session_state.custom_geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
                 st.rerun()
         
@@ -147,7 +143,7 @@ if calculate_geo_spend:
                 st.session_state.custom_geo_df, 
                 num_rows="dynamic", 
                 use_container_width=True,
-                key="custom_geo_df_editor" # Use a distinct key for the widget
+                key="custom_geo_df_editor"
             )
             st.session_state.custom_geo_df = edited_df
             
@@ -220,7 +216,6 @@ if st.session_state.submit:
     if mode == "Estimate MDE":
         st.subheader("📉 Minimum Detectable Effect")
         mde_results = calculate_mde_frequentist(p_A, fixed_n, desired_power, alpha, num_variants)
-        # FIX: Check if mde_results is empty to handle failure case.
         if mde_results:
             mde, achieved_power = mde_results[-1]
             st.success(f"With **{fixed_n:,} users** per group, the smallest uplift you can reliably detect is **{mde:.2%}** (with {achieved_power:.1%} power).")
