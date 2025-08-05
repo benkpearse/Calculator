@@ -95,6 +95,8 @@ ALL_REGIONS = GEO_DEFAULTS["Region"].tolist()
 # --- Initialize Session State ---
 if 'selected_regions' not in st.session_state:
     st.session_state.selected_regions = ALL_REGIONS
+if 'geo_df_custom' not in st.session_state:
+    st.session_state.geo_df_custom = GEO_DEFAULTS.copy()
 
 # --- UI ---
 st.title("⚙️ Pre-Test Power Calculator")
@@ -104,8 +106,8 @@ with st.expander("What is Power Analysis? Click here to learn more.", expanded=F
     Power analysis is a statistical method used **before** an A/B test to estimate the resources needed. It helps you design a test that is both effective and efficient.
     - **Why is it important?** Without proper planning, you might run a test that is too short to detect a real improvement (a "false negative"), or a test that is unnecessarily long, wasting time and resources.
     #### Key Concepts
-    - **Sample Size:** The number of users or sessions required in each group.
-    - **Statistical Power:** The probability of detecting a real effect, if one truly exists. 80% is a common target.
+    - **Sample Size:** The number of users or sessions required in each group (e.g., 'Control' and 'Variant').
+    - **Statistical Power (or Sensitivity):** The probability of detecting a real effect, if one truly exists. A power of 80% means you have an 80% chance of detecting a genuine uplift.
     - **Minimum Detectable Effect (MDE):** The smallest improvement you want your test to be able to detect.
     #### How to Use This Tool
     1.  **Set Inputs:** Use the sidebar to enter your test parameters.
@@ -130,16 +132,9 @@ with st.sidebar.form("params_form"):
         st.subheader("Frequentist Settings")
         alpha, desired_power = st.slider("Significance α", 0.01, 0.10, 0.05, help="Tolerance for a false positive."), st.slider("Desired Power (1-β)", 0.5, 0.99, 0.8, help="Chance of detecting the uplift if it's real.")
     
-    st.header("2. Optional Calculations")
-    estimate_duration = st.checkbox("Estimate Test Duration", value=True)
-    if estimate_duration:
-        weekly_traffic = st.number_input("Weekly traffic", min_value=1, value=20000, help="Total users entering the experiment each week (before 50/50 split).")
-    else:
-        weekly_traffic = 0
-
     submit = st.form_submit_button("Run Calculation", type="primary")
 
-st.sidebar.header("Geo Spend Configuration")
+st.sidebar.header("2. Geo Spend Configuration")
 calculate_geo_spend = st.sidebar.checkbox("Calculate Geo Spend", value=True, help="Enable to plan ad spend for a geo-based test.")
 if calculate_geo_spend:
     spend_mode = st.sidebar.radio("Weighting Mode", ["Population-based", "Equal", "Custom"], index=0, horizontal=True, help="How to distribute sample size across active regions.")
@@ -147,7 +142,6 @@ if calculate_geo_spend:
 if calculate_geo_spend:
     with st.expander("Configure Active Regions and Custom Data", expanded=False):
         st.write("First, select regions, then click 'Confirm'. For 'Custom' mode, the editor will then appear.")
-        
         with st.form("region_selection_form"):
             temp_selections = []
             cols = st.columns(3)
@@ -155,36 +149,21 @@ if calculate_geo_spend:
                 with cols[i % 3]:
                     if st.checkbox(region, value=(region in st.session_state.selected_regions), key=f"check_{region}"):
                         temp_selections.append(region)
-            
             submitted = st.form_submit_button("Confirm Region Selection")
             if submitted:
                 st.session_state.selected_regions = temp_selections
-                # DEFINITIVE FIX: When regions change, reset the custom editor's state to the new defaults.
-                # This prevents all crashes and state mismatches.
-                df_for_editor = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
-                st.session_state["custom_geo_data_editor"] = df_for_editor
                 st.rerun()
-
         if spend_mode == 'Custom':
             st.markdown("---")
-            st.write("Edit weights and CPMs below. Your edits will be saved automatically.")
-            
-            # Initialize the editor's state if it doesn't exist
-            if "custom_geo_data_editor" not in st.session_state:
-                st.session_state["custom_geo_data_editor"] = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
-
-            # The editor widget is now the single, reliable source of truth.
-            edited_df = st.data_editor(
-                st.session_state["custom_geo_data_editor"], 
-                num_rows="dynamic", 
-                use_container_width=True, 
-                key="custom_geo_data_editor"
-            )
-            
-            current_sum = edited_df['Weight'].sum()
-            st.metric(label="Current Weight Sum", value=f"{current_sum:.2%}", delta=f"{(current_sum - 1.0):.2%} from target")
-            if not np.isclose(current_sum, 1.0):
-                st.warning("Sum of weights must be 100%.")
+            editor_display_df = st.session_state.geo_df_custom[st.session_state.geo_df_custom['Region'].isin(st.session_state.selected_regions)].copy()
+            if not editor_display_df.empty:
+                edited_df = st.data_editor(editor_display_df, num_rows="dynamic", use_container_width=True, key="custom_geo_editor")
+                current_sum = edited_df['Weight'].sum()
+                st.metric(label="Current Weight Sum", value=f"{current_sum:.2%}", delta=f"{(current_sum - 1.0):.2%} from target")
+                if not np.isclose(current_sum, 1.0): st.warning("Sum of weights must be 100%.")
+                st.session_state.geo_df_custom.update(edited_df)
+            else:
+                st.warning("Please select at least one region and click 'Confirm' to configure custom weights.")
 
 st.markdown("---")
 
@@ -192,22 +171,22 @@ if submit:
     st.header("Results")
     req_n, total_spend, weeks = None, None, None
     
+    # --- 1. Core Calculation ---
     if mode == "Estimate Sample Size":
         if methodology == "Frequentist": req_n = calculate_sample_size_frequentist(p_A, uplift, desired_power, alpha)
         else:
             b_results = simulate_power(p_A, uplift, thresh, desired_power, sims, samples, 1, 1)
             if b_results and b_results[-1][1] >= desired_power: req_n = b_results[-1][0]
-    else: req_n = fixed_n
+    else: # MDE Mode
+        req_n = fixed_n
     
+    # --- 2. Geo Spend Calculation (if applicable) ---
     if calculate_geo_spend and req_n:
         if st.session_state.selected_regions:
             geo_df = pd.DataFrame()
             if spend_mode == "Custom":
-                geo_df = pd.DataFrame(st.session_state.get("custom_geo_data_editor", []))
-                if geo_df.empty: # Fallback if editor was never shown
-                     geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
-                if not np.isclose(geo_df['Weight'].sum(), 1.0):
-                    st.error("Final check failed: Custom weights must sum to 1.0."); geo_df = pd.DataFrame()
+                geo_df = st.session_state.geo_df_custom[st.session_state.geo_df_custom['Region'].isin(st.session_state.selected_regions)].copy()
+                if not np.isclose(geo_df['Weight'].sum(), 1.0): geo_df = pd.DataFrame()
             else:
                 base_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
                 if not base_df.empty:
@@ -221,25 +200,31 @@ if submit:
                 geo_df["Spend (£)"] = geo_df["Impressions (k)"] * geo_df["CPM (£)"]
                 total_spend = geo_df['Spend (£)'].sum()
 
-    if weekly_traffic and weekly_traffic > 0 and req_n:
-        weeks = (req_n * 2) / weekly_traffic
-
+    # --- 3. Display Executive Summary ---
     if req_n:
         with st.container(border=True):
             st.subheader("Executive Summary")
+            
+            # Key Metrics
             col1, col2, col3 = st.columns(3)
             col1.metric("Sample Size (per Variant)", f"{req_n:,}")
             col2.metric("Total Users Required", f"{(req_n * 2):,}")
-            if total_spend is not None: col3.metric("Total Estimated Ad Spend", f"£{total_spend:,.0f}")
-            else: col3.metric("Total Estimated Ad Spend", "N/A")
+            if total_spend is not None:
+                col3.metric("Total Estimated Ad Spend", f"£{total_spend:,.0f}")
+            else:
+                col3.metric("Total Estimated Ad Spend", "N/A")
+
+            # Narrative Summary
             st.markdown("---")
             summary_text = f"To confidently detect the specified effect, this test requires **{req_n*2:,} total users**."
-            if total_spend is not None: summary_text += f" This corresponds to an estimated ad spend of **£{total_spend:,.0f}**."
-            if weeks is not None: summary_text += f" At the specified traffic rate, the test will take approximately **{weeks:.1f} weeks**."
+            if total_spend is not None:
+                summary_text += f" This corresponds to an estimated ad spend of **£{total_spend:,.0f}**."
             st.info(summary_text)
-    else:
+
+    else: # If no calculation was possible
         st.error("Could not determine the required sample size with the provided inputs.")
 
+    # --- 4. Display Detailed Breakdowns ---
     if mode == "Estimate MDE":
         st.subheader("📉 Minimum Detectable Effect")
         if methodology == "Frequentist": mde_results = calculate_mde_frequentist(p_A, fixed_n, desired_power, alpha)
@@ -250,6 +235,14 @@ if submit:
         else:
             st.warning("Could not reach desired power with the given sample size.")
     
+    # --- Optional Duration Calculation ---
+    if req_n:
+        st.subheader("🗓️ Estimate Test Duration (Optional)")
+        weekly_traffic = st.number_input("Enter total weekly traffic to estimate duration:", min_value=0, value=0, help="Total users entering the experiment each week (before the 50/50 split).")
+        if weekly_traffic > 0:
+            weeks = (req_n * 2) / weekly_traffic
+            st.success(f"At this rate, the test will take approximately **{weeks:.1f} weeks** to complete.")
+
     if calculate_geo_spend and total_spend is not None:
         with st.expander("View Geo Spend Breakdown"):
             st.write("**Spend Breakdown by Region**")
