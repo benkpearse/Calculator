@@ -3,127 +3,237 @@ import numpy as np
 from scipy.stats import norm
 import matplotlib.pyplot as plt
 import pandas as pd
+from typing import List, Tuple
 
-# --- Constants & Helpers ---
-UK_REGIONS = [
-    "North East", "North West", "Yorkshire and the Humber", "East Midlands",
-    "West Midlands", "East of England", "London", "South East",
-    "South West", "Wales", "Scotland", "Northern Ireland"
-]
-DEFAULT_CPMS = [7.50, 8.00, 8.25, 7.00, 7.80, 8.10, 12.00, 10.00, 7.60, 6.90, 9.00, 8.50]
-HISTORICAL_PROFILE_KEY = "last_geo_profile"
+# 1. Set Page Configuration
+st.set_page_config(
+    page_title="A/B/n Test Power Calculator",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
 
+# --- Core Calculation Functions (Frequentist Only) ---
 @st.cache_data
-def fetch_ons_weights():
-    try:
-        url = "https://example.com/ons_uk_region_weights.csv"
-        df = pd.read_csv(url)
-        df = df.set_index("Region").loc[UK_REGIONS].reset_index()
-        return df["Weight"].tolist()
-    except Exception:
-        return [1/len(UK_REGIONS)] * len(UK_REGIONS)
-
-@st.cache_data
-def build_geo_df(regions, weights, cpms):
-    df = pd.DataFrame({"Region": regions, "Weight": weights, "CPM (£)": cpms})
-    total_weight = df["Weight"].sum()
-    if total_weight > 0:
-        df["Weight"] = df["Weight"] / total_weight
-    return df
-
-@st.cache_data
-def calculate_power(p_A, p_B, n, alpha=0.05):
+def calculate_power_frequentist(p_A: float, p_B: float, n: int, alpha: float = 0.05, num_comparisons: int = 1) -> float:
+    """Calculates power with Bonferroni correction for multiple comparisons."""
+    if p_B < 0 or p_B > 1.0: return 0.0
+    
+    # Bonferroni Correction: Adjust alpha for the number of comparisons (variants)
+    adjusted_alpha = alpha / num_comparisons
+    
     se = np.sqrt(p_A * (1 - p_A) / n + p_B * (1 - p_B) / n)
-    if se == 0:
-        return 1.0
-    z = norm.ppf(1 - alpha/2)
-    effect_size = abs(p_B - p_A) / se
-    return norm.cdf(effect_size - z) + norm.cdf(-effect_size - z)
+    if se == 0: return 1.0
+    
+    effect_size_norm = abs(p_B - p_A) / se
+    z_alpha = norm.ppf(1 - adjusted_alpha / 2) # Use adjusted alpha for the critical value
+    
+    return norm.cdf(effect_size_norm - z_alpha) + norm.cdf(-effect_size_norm - z_alpha)
 
 @st.cache_data
-def calculate_required_sample(p_A, uplift, power_target=0.8, alpha=0.05):
+def calculate_sample_size_frequentist(p_A: float, uplift: float, power_target: float = 0.8, alpha: float = 0.05, num_variants: int = 1) -> int | None:
+    """Calculates required sample size by iteratively searching for 'n'."""
     p_B = p_A * (1 + uplift)
-    if p_B >= 1:
-        return None
-    n = 100
-    while n < 500000:
-        power = calculate_power(p_A, p_B, n, alpha)
-        if power >= power_target:
-            return n
-        n += 100
-    return None
+    if p_B >= 1: return None
+    n, power, MAX_SAMPLE_SIZE = 100, 0, 5_000_000
+    while power < power_target and n < MAX_SAMPLE_SIZE:
+        power = calculate_power_frequentist(p_A, p_B, n, alpha, num_comparisons=num_variants)
+        if power >= power_target: return int(n)
+        if n < 1000: n += 50
+        elif n < 20000: n = int(n * 1.2)
+        else: n = int(n * 1.1)
+    if n >= MAX_SAMPLE_SIZE: return None
+    return int(n)
 
 @st.cache_data
-def calculate_mde(p_A, n, power_target=0.8, alpha=0.05):
-    for uplift in np.linspace(0.001, 0.5, 100):
+def calculate_mde_frequentist(p_A: float, n: int, power_target: float = 0.8, alpha: float = 0.05, num_variants: int = 1) -> List[Tuple[float, float]]:
+    """Calculates MDE by iteratively searching for the uplift that meets the target power."""
+    results = []
+    for uplift in np.linspace(0.001, 0.50, 100):
         p_B = p_A * (1 + uplift)
-        if p_B >= 1: continue
-        power = calculate_power(p_A, p_B, n, alpha)
-        if power >= power_target:
-            return uplift, power
-    return None, 0
+        if p_B > 1.0: continue
+        power = calculate_power_frequentist(p_A, p_B, n, alpha, num_comparisons=num_variants)
+        results.append((uplift, power))
+        if power >= power_target: break
+    return results
 
-# --- UI Setup ---
-st.set_page_config(page_title="Power Calculator", layout="centered")
-st.title("⚙️ Pre-Test Power Calculator")
+# --- Geo Testing Data and Session State ---
+GEO_DEFAULTS = pd.DataFrame({
+    "Region": ["North East", "North West", "Yorkshire and the Humber", "East Midlands", "West Midlands", "East of England", "London", "South East", "South West", "Wales", "Scotland", "Northern Ireland"],
+    "Weight": [0.03, 0.09, 0.07, 0.07, 0.09, 0.10, 0.18, 0.16, 0.07, 0.04, 0.07, 0.03],
+    "CPM (£)": [7.50, 8.00, 8.25, 7.00, 7.80, 8.10, 12.00, 10.00, 7.60, 6.90, 9.00, 8.50]
+})
+ALL_REGIONS = GEO_DEFAULTS["Region"].tolist()
 
-with st.sidebar.form("params_form"):
-    st.header("1. Inputs")
-    mode = st.radio("Goal", ["Estimate Sample Size", "Estimate MDE"])
-    p_A = st.number_input("Baseline rate (p_A)", 0.0001, 0.9999, 0.05, 0.001)
-    if mode == "Estimate Sample Size":
-        uplift = st.number_input("Expected uplift", 0.0001, 0.999, 0.1, 0.01)
-    else:
-        fixed_n = st.number_input("Sample size per group", 100, 100000, 10000, 100)
-    alpha = st.slider("Significance level (α)", 0.01, 0.1, 0.05)
-    power_target = st.slider("Target Power (1-β)", 0.5, 0.99, 0.8)
-    weekly_traffic = st.number_input("Weekly test traffic", 1, 1000000, 20000)
+def reset_app_state():
+    """Clears all session state variables to reset the app."""
+    st.session_state.clear()
 
-    st.header("2. Geo Spend")
-    include_geo = st.checkbox("Include Geo Spend", value=False)
-    geo_df = None
-    if include_geo:
-        preset = st.selectbox("Weight Preset", ["Equal", "ONS Population"], index=1)
-        weights = fetch_ons_weights() if preset == "ONS Population" else [1/len(UK_REGIONS)] * len(UK_REGIONS)
-        geo_df = build_geo_df(UK_REGIONS, weights, DEFAULT_CPMS)
-        st.session_state[HISTORICAL_PROFILE_KEY] = geo_df
+# --- UI ---
+st.title("⚙️ A/B/n Pre-Test Power Calculator")
 
-    submitted = st.form_submit_button("Run Calculation")
+with st.expander("What is Power Analysis? Click here to learn more.", expanded=False):
+    st.markdown("""
+    Power analysis is a statistical method used **before** an A/B test to estimate the resources needed. It helps you design a test that is both effective and efficient.
+    - **Why is it important?** Without proper planning, you might run a test that is too short to detect a real improvement (a "false negative"), or a test that is unnecessarily long, wasting time and resources.
+    #### Key Concepts
+    - **Sample Size:** The number of users or sessions required in each group (e.g., 'Control' and 'Variant').
+    - **Statistical Power (or Sensitivity):** The probability of detecting a real effect, if one truly exists. A power of 80% means you have an 80% chance of detecting a genuine uplift.
+    - **Minimum Detectable Effect (MDE):** The smallest improvement you want your test to be able to detect.
+    #### How to Use This Tool
+    1.  **Set Inputs:** Use the sidebar to enter your test parameters.
+    2.  **Configure Geo-Test (Optional):** Use the main panel to select active regions and set custom weights or costs.
+    3.  **Calculate:** Click "Run Calculation" to see the summary of required resources.
+    """)
 
-if submitted:
-    if mode == "Estimate Sample Size":
-        required_n = calculate_required_sample(p_A, uplift, power_target, alpha)
-        if required_n:
-            st.success(f"Required sample size per group: {required_n:,}")
-            total_users = required_n * 2
-        else:
-            st.error("Could not calculate sample size.")
-            total_users = 0
-    else:
-        uplift, power = calculate_mde(p_A, fixed_n, power_target, alpha)
-        if uplift:
-            st.success(f"Minimum detectable uplift: {uplift:.2%} with {power:.1%} power")
-            total_users = fixed_n * 2
-        else:
-            st.error("Could not determine MDE.")
-            total_users = 0
+st.sidebar.button("Reset All Settings", on_click=reset_app_state, use_container_width=True)
+st.sidebar.markdown("---")
 
-    if total_users:
-        weeks = total_users / weekly_traffic
-        st.info(f"Estimated test duration: {weeks:.1f} weeks")
-
-    if include_geo and geo_df is not None and total_users > 0:
-        geo_df = geo_df.copy()
-        geo_df["Users"] = geo_df["Weight"] * total_users
-        geo_df["Impressions (k)"] = geo_df["Users"] / 1000
-        geo_df["Spend (£)"] = geo_df["Impressions (k)"] * geo_df["CPM (£)"]
-        st.subheader("💰 Geo Spend Breakdown")
-        st.dataframe(geo_df.style.format({"Weight":"{:.1%}","Spend (£)":"£{:.2f}"}))
-        st.download_button("Download CSV", geo_df.to_csv(index=False), "geo_spend.csv")
-        fig, ax = plt.subplots(figsize=(8,4))
-        ax.barh(geo_df['Region'], geo_df['Spend (£)'])
-        ax.set_xlabel("Spend (£)")
-        ax.set_title("Geo Spend by Region")
-        st.pyplot(fig)
+st.sidebar.header("1. Main Parameters")
+num_variants = st.sidebar.number_input("Number of Variants (excluding control)", min_value=1, max_value=10, value=1, key='num_variants', help="An A/B test has 1 variant. An A/B/C test has 2 variants.")
+mode = st.sidebar.radio("Planning Mode", ["Estimate Sample Size", "Estimate MDE"], horizontal=True, key='mode', help="Solve for sample size or minimum detectable effect.")
+p_A = st.sidebar.number_input("Baseline rate (p_A)", 0.0001, 0.999, 0.05, 0.001, format="%.4f", key='p_A', help="Conversion rate of the control group.")
+if mode == "Estimate Sample Size":
+    uplift = st.sidebar.number_input("Expected uplift", 0.0001, 0.999, 0.10, 0.01, format="%.4f", key='uplift', help="Relative improvement you want to detect in the winning variant.")
 else:
-    st.info("Set parameters and click 'Run Calculation'")
+    fixed_n = st.sidebar.number_input("Fixed sample size per group", 100, value=10000, step=100, key='fixed_n', help="Users available for the control and EACH variant.")
+
+st.sidebar.subheader("Test Settings")
+alpha = st.sidebar.slider("Significance α (Family-wise)", 0.01, 0.10, 0.05, key='alpha', help="Overall chance of a false positive. Auto-adjusted for multiple comparisons.")
+desired_power = st.sidebar.slider("Desired Power (1-β)", 0.5, 0.99, 0.8, key='desired_power_f')
+
+st.sidebar.header("2. Optional Calculations")
+estimate_duration = st.sidebar.checkbox("Estimate Test Duration", value=True, key='estimate_duration')
+if estimate_duration:
+    weekly_traffic = st.sidebar.number_input("Total weekly traffic for test", min_value=1, value=20000, key='weekly_traffic', help="All users entering the experiment, to be split across all groups.")
+else:
+    weekly_traffic = 0
+
+st.sidebar.header("3. Geo Spend Configuration")
+calculate_geo_spend = st.sidebar.checkbox("Calculate Geo Spend", value=True, key='calculate_geo_spend', help="Enable to plan ad spend for a geo-based test.")
+if calculate_geo_spend:
+    spend_mode = st.sidebar.radio("Weighting Mode", ["Population-based", "Equal", "Custom"], index=0, horizontal=True, key='spend_mode', help="How to distribute sample size across active regions.")
+
+if calculate_geo_spend:
+    with st.expander("Configure Active Regions and Custom Data", expanded=False):
+        with st.form("region_selection_form"):
+            temp_selections = []
+            cols = st.columns(3)
+            for i, region in enumerate(ALL_REGIONS):
+                with cols[i % 3]:
+                    if st.checkbox(region, value=(region in st.session_state.get('selected_regions', ALL_REGIONS)), key=f"check_{region}"):
+                        temp_selections.append(region)
+            submitted = st.form_submit_button("Confirm Region Selection")
+            if submitted:
+                st.session_state.selected_regions = temp_selections
+                # DEFINITIVE FIX: Use one consistent key and initialize the DataFrame.
+                st.session_state.custom_geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.selected_regions)].copy()
+                st.rerun()
+        
+        if spend_mode == 'Custom':
+            st.markdown("---")
+            st.write("Edit weights and CPMs below. Your edits will be saved automatically.")
+            
+            # Initialize the custom df if it doesn't exist
+            if 'custom_geo_df' not in st.session_state:
+                st.session_state.custom_geo_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(st.session_state.get('selected_regions', ALL_REGIONS))].copy()
+            
+            # The editor now directly reads from and writes to the same session state key.
+            edited_df = st.data_editor(
+                st.session_state.custom_geo_df, 
+                num_rows="dynamic", 
+                use_container_width=True, 
+                key="custom_geo_df" # This key is now the single source of truth
+            )
+            current_sum = edited_df['Weight'].sum()
+            st.metric(label="Current Weight Sum", value=f"{current_sum:.2%}", delta=f"{(current_sum - 1.0):.2%} from target")
+            if not np.isclose(current_sum, 1.0): st.warning("Sum of weights must be 100%.")
+
+st.markdown("---")
+submit = st.sidebar.button("Run Calculation", type="primary", use_container_width=True)
+
+if submit:
+    st.header("Results")
+    req_n, total_spend, weeks = None, None, None
+    num_groups = 1 + num_variants
+    
+    if mode == "Estimate Sample Size":
+        req_n = calculate_sample_size_frequentist(p_A, uplift, desired_power, alpha, num_variants)
+    else: 
+        req_n = fixed_n
+    
+    total_users = req_n * num_groups if req_n else 0
+    
+    if calculate_geo_spend and req_n:
+        selected_regions = st.session_state.get('selected_regions', ALL_REGIONS)
+        if selected_regions:
+            geo_df = pd.DataFrame()
+            if spend_mode == "Custom":
+                # DEFINITIVE FIX: Read directly from the consistent session state key.
+                geo_df = st.session_state.get("custom_geo_df", pd.DataFrame()).copy()
+                if not np.isclose(geo_df['Weight'].sum(), 1.0):
+                    st.error("Final check failed: Custom weights must sum to 1.0."); geo_df = pd.DataFrame()
+            else:
+                base_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(selected_regions)].copy()
+                if not base_df.empty:
+                    if spend_mode == "Population-based": base_df["Weight"] /= base_df["Weight"].sum()
+                    else: base_df["Weight"] = 1 / len(base_df)
+                geo_df = base_df
+            
+            if not geo_df.empty:
+                geo_df["Users"] = (geo_df["Weight"] * total_users).astype(int)
+                geo_df["Impressions (k)"] = geo_df["Users"] / 1000
+                geo_df["Spend (£)"] = geo_df["Impressions (k)"] * geo_df["CPM (£)"]
+                total_spend = geo_df['Spend (£)'].sum()
+
+    if weekly_traffic > 0 and req_n:
+        weeks = total_users / weekly_traffic
+
+    if req_n:
+        with st.container(border=True):
+            st.subheader("Executive Summary")
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Test Groups", f"{num_groups} (1C + {num_variants}V)")
+            col2.metric("Sample Size (per Group)", f"{req_n:,}")
+            col3.metric("Total Users Required", f"{total_users:,}")
+            if total_spend is not None: col4.metric("Total Estimated Ad Spend", f"£{total_spend:,.0f}")
+            else: col4.metric("Total Estimated Ad Spend", "N/A", help="Enable Geo Spend to calculate.")
+            st.markdown("---")
+            summary_text = f"For a test with **{num_groups} groups**, you will need **{req_n:,} users per group**, for a total of **{total_users:,} users**."
+            if total_spend is not None: summary_text += f" This corresponds to an estimated ad spend of **£{total_spend:,.0f}**."
+            if weeks is not None: summary_text += f" At the specified traffic rate, the test will take approximately **{weeks:.1f} weeks**."
+            st.info(summary_text)
+    else:
+        st.error("Could not determine the required sample size with the provided inputs.")
+
+    if mode == "Estimate MDE":
+        st.subheader("📉 Minimum Detectable Effect")
+        mde_results = calculate_mde_frequentist(p_A, fixed_n, desired_power, alpha, num_variants)
+        if mde_results and mde_results[-1][1] >= desired_power:
+            mde, achieved_power = mde_results[-1]
+            st.success(f"With **{fixed_n:,} users** per group, the smallest uplift you can reliably detect is **{mde:.2%}** (with {achieved_power:.1%} power).")
+        else:
+            st.warning("Could not reach desired power with the given sample size.")
+    
+    if calculate_geo_spend and total_spend is not None:
+        with st.expander("View Geo Spend Breakdown"):
+            st.write("**Spend Breakdown by Region**")
+            style = {"Weight": "{:.1%}", "Users": "{:,.0f}", "CPM (£)": "£{:.2f}", "Impressions (k)": "{:,.1f}", "Spend (£)": "£{:,.2f}"}
+            st.dataframe(geo_df.style.format(style), use_container_width=True)
+            st.download_button("Download CSV", geo_df.to_csv(index=False), file_name="geo_spend_plan.csv")
+            fig, ax = plt.subplots(); ax.barh(geo_df["Region"], geo_df["Spend (£)"])
+            ax.set_xlabel("Spend (£)"); ax.set_title("Geo Spend Breakdown"); plt.tight_layout(); st.pyplot(fig)
+
+    if mode == "Estimate Sample Size" and req_n:
+        with st.expander("View Sample Size vs. Uplift Sensitivity"):
+            uplifts_plot = np.linspace(uplift * 0.5, uplift * 2.0, 50)
+            sizes = [calculate_sample_size_frequentist(p_A, u, desired_power, alpha, num_variants) for u in uplifts_plot if u > 0 and p_A*(1+u) <= 1]
+            valid_uplifts = [u for u in uplifts_plot if u > 0 and p_A*(1+u) <= 1 and calculate_sample_size_frequentist(p_A, u, desired_power, alpha, num_variants) is not None]
+            sizes = [s for s in sizes if s is not None]
+            if valid_uplifts:
+                fig2, ax2 = plt.subplots()
+                ax2.plot([u * 100 for u in valid_uplifts], sizes); ax2.axvline(uplift * 100, linestyle='--', color='red', label=f"Your Target ({uplift:.1%})")
+                ax2.set_xlabel("Uplift (%)"); ax2.set_ylabel("Sample Size per Group")
+                ax2.set_title("Sample Size vs Uplift"); ax2.legend(); ax2.grid(True, linestyle='--', alpha=0.6); st.pyplot(fig2)
+
+else:
+    st.info("Set your parameters in the sidebar and click 'Run Calculation'.")
