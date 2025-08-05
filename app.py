@@ -86,7 +86,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 with st.expander("What is Power Analysis? Click here to learn more.", expanded=False):
-    st.markdown("""        
+    st.markdown("""
     Power analysis is a statistical method used **before** an A/B test to estimate the resources needed. It helps you design a test that is both effective and efficient.
     - **Why is it important?** Without proper planning, you might run a test that is too short to detect a real improvement (a "false negative"), or a test that is unnecessarily long, wasting time and resources.
     #### Key Concepts
@@ -97,7 +97,7 @@ with st.expander("What is Power Analysis? Click here to learn more.", expanded=F
     1.  **Set Inputs:** Use the sidebar to enter your test parameters.
     2.  **Configure Geo-Test (Optional):** Use the main panel to select active regions and set custom weights or costs.
     3.  **Calculate:** Click "Run Calculation" to see the summary of required resources.
-    """) 
+    """)
 
 st.sidebar.button("Reset All Settings", on_click=reset_app_state, use_container_width=True)
 st.sidebar.markdown("---")
@@ -110,12 +110,15 @@ p_A = st.sidebar.number_input("Baseline rate (p_A)", 0.0001, 0.999, 0.05, 0.001,
 disable_run = False
 if mode == "Estimate Sample Size":
     uplift = st.sidebar.number_input("Expected uplift", 0.0001, 0.999, 0.10, 0.01, format="%.4f", key='uplift', help="Relative improvement you want to detect in the winning variant.")
-    # FIX: Proactively check for invalid inputs
     if p_A * (1 + uplift) >= 1.0:
         disable_run = True
         st.sidebar.error("Variant rate (baseline * (1 + uplift)) must be less than 100%.")
-else:
-    fixed_n = st.sidebar.number_input("Fixed sample size per group", 100, value=10000, step=100, key='fixed_n', help="Users available for the control and EACH variant.")
+else: # MDE Mode
+    mde_source = st.sidebar.radio("Determine Sample Size By:", ["Manual Input", "Fixed Budget"], key='mde_source')
+    if mde_source == "Manual Input":
+        fixed_n = st.sidebar.number_input("Fixed sample size per group", 100, value=10000, step=100, key='fixed_n', help="Users available for the control and EACH variant.")
+    else: # Fixed Budget
+        total_budget = st.sidebar.number_input("Total Ad Spend (£)", min_value=100, value=50000, step=100, key='total_budget')
 
 st.sidebar.subheader("Test Settings")
 alpha = st.sidebar.slider("Significance α (Family-wise)", 0.01, 0.10, 0.05, key='alpha', help="Overall chance of a false positive. Auto-adjusted for multiple comparisons.")
@@ -129,9 +132,9 @@ else:
     weekly_traffic = 0
 
 st.sidebar.header("3. Geo Spend Configuration")
-calculate_geo_spend = st.sidebar.checkbox("Calculate Geo Spend", value=True, key='calculate_geo_spend', help="Enable to plan ad spend for a geo-based test.")
-
-if calculate_geo_spend:
+force_geo = mode == "Estimate MDE" and st.session_state.get('mde_source') == "Fixed Budget"
+calculate_geo_spend = st.sidebar.checkbox("Calculate Geo Spend", value=True, key='calculate_geo_spend', help="Enable to plan ad spend for a geo-based test.", disabled=force_geo)
+if calculate_geo_spend or force_geo:
     spend_mode = st.sidebar.radio("Weighting Mode", ["Population-based", "Equal", "Custom"], index=0, horizontal=True, key='spend_mode', help="How to distribute sample size across active regions.")
     
     with st.expander("Configure Active Regions and Custom Data", expanded=False):
@@ -168,10 +171,9 @@ if calculate_geo_spend:
             if not np.isclose(current_sum, 1.0): st.warning("Sum of weights must be 100%.")
 
 with st.sidebar.expander("Advanced Settings"):
-    max_sample_size = st.number_input("Max Sample Size Limit", min_value=100_000, value=5_000_000, step=1_000_000, help="The maximum sample size the calculator will search up to. Increase this for tests with very small effects.")
+    max_sample_size = st.number_input("Max Sample Size Limit", min_value=100_000, value=5_000_000, step=1_000_000, help="The maximum sample size the calculator will search up to.")
 
 st.sidebar.markdown("---")
-# FIX: Pass the disabled flag to the button
 submit = st.sidebar.button("Run Calculation", type="primary", use_container_width=True, disabled=disable_run)
 
 if 'submit' not in st.session_state:
@@ -186,16 +188,44 @@ if st.session_state.submit:
     
     if mode == "Estimate Sample Size":
         req_n = calculate_sample_size_frequentist(p_A, uplift, desired_power, alpha, num_variants, max_sample_size)
-    else: 
-        req_n = fixed_n
-    
+    else: # MDE Mode
+        if mde_source == "Manual Input":
+            req_n = fixed_n
+        else: # Fixed Budget
+            selected_regions = st.session_state.get('selected_regions', ALL_REGIONS)
+            if not selected_regions:
+                st.error("Please select at least one region to plan from a budget.")
+                st.stop()
+            
+            geo_df_for_cpm = pd.DataFrame()
+            if spend_mode == "Custom":
+                geo_df_for_cpm = st.session_state.get("custom_geo_df", pd.DataFrame()).copy()
+            else:
+                base_df = GEO_DEFAULTS[GEO_DEFAULTS['Region'].isin(selected_regions)].copy()
+                if not base_df.empty:
+                    if spend_mode == "Population-based": base_df["Weight"] /= base_df["Weight"].sum()
+                    else: base_df["Weight"] = 1 / len(base_df)
+                geo_df_for_cpm = base_df
+            
+            if not geo_df_for_cpm.empty:
+                weighted_avg_cpm = (geo_df_for_cpm['CPM (£)'] * geo_df_for_cpm['Weight']).sum()
+                if weighted_avg_cpm > 0:
+                    total_users_from_budget = (total_budget / weighted_avg_cpm) * 1000
+                    req_n = int(total_users_from_budget / num_groups)
+                else:
+                    st.error("Cannot calculate sample size with a CPM of £0.")
+                    st.stop()
+            else:
+                st.error("Could not build geo data for budget calculation.")
+                st.stop()
+
     if req_n is None:
         st.error(f"Could not determine sample size. The required sample size may exceed the current limit of {max_sample_size:,}. You can increase this limit under 'Advanced Settings'.")
         st.stop()
 
     total_users = req_n * num_groups
     
-    if calculate_geo_spend:
+    if calculate_geo_spend or force_geo:
         selected_regions = st.session_state.get('selected_regions', ALL_REGIONS)
         if selected_regions:
             geo_df = pd.DataFrame()
@@ -236,14 +266,14 @@ if st.session_state.submit:
 
     if mode == "Estimate MDE":
         st.subheader("📉 Minimum Detectable Effect")
-        mde_results = calculate_mde_frequentist(p_A, fixed_n, desired_power, alpha, num_variants)
+        mde_results = calculate_mde_frequentist(p_A, req_n, desired_power, alpha, num_variants)
         if mde_results:
             mde, achieved_power = mde_results[-1]
-            st.success(f"With **{fixed_n:,} users** per group, the smallest uplift you can reliably detect is **{mde:.2%}** (with {achieved_power:.1%} power).")
+            st.success(f"With **{req_n:,} users** per group, the smallest uplift you can reliably detect is **{mde:.2%}** (with {achieved_power:.1%} power).")
         else:
-            st.warning("Could not reach desired power within the tested uplift range (up to 50%). Please increase the sample size.")
+            st.warning("Could not reach desired power within the tested uplift range (up to 50%). Please increase the sample size or budget.")
     
-    if calculate_geo_spend and total_spend is not None:
+    if (calculate_geo_spend or force_geo) and total_spend is not None:
         with st.expander("View Geo Spend Breakdown"):
             st.write("**Spend Breakdown by Region**")
             style = {"Weight": "{:.1%}", "Users": "{:,.0f}", "CPM (£)": "£{:.2f}", "Impressions (k)": "{:,.1f}", "Spend (£)": "£{:,.2f}"}
