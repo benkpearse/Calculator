@@ -201,7 +201,7 @@ if use_unequal_split:
 st.sidebar.header("Optional Calculations")
 estimate_duration = st.sidebar.checkbox("Estimate Test Duration", value=True, key='estimate_duration')
 if estimate_duration:
-    weekly_traffic = st.sidebar.number_input("Total weekly traffic for test", 1, 20000, key='weekly_traffic', help="The total number of users available per week for this experiment.")
+    weekly_traffic = st.sidebar.number_input("Total weekly traffic for test", min_value=1, max_value=None, key='weekly_traffic', help="The total number of users available per week for this experiment.")
 
 st.sidebar.header("Geo Spend Configuration")
 force_geo = mode == "Find detectable uplift for fixed resources" and mde_source == "Fixed Budget"
